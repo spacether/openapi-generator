@@ -248,7 +248,8 @@ class ApiClient(object):
             return {
                 key: cls.sanitize_for_serialization(val) for key, val in model_to_dict(obj, serialize=True).items()
             }
-        elif isinstance(obj, (str, int, float, none_type, bool)):
+        elif isinstance(obj, (str, int, float, none_type, bool, bytes)):
+            # bytes are not sent in json payloads but they may be posted
             return obj
         elif isinstance(obj, (datetime, date)):
             return obj.isoformat()
