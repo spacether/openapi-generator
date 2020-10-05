@@ -181,6 +181,8 @@ class TestFakeApi(unittest.TestCase):
         cat_in_composed = composed_one_of_number_with_validations.ComposedOneOfNumberWithValidations(
             class_name="Cat", color="black"
         )
+        # TODO do not have cat self be in cat._additional_properties_instances
+        # TODO if it does not have additional properties
         import datetime
         date = datetime.date(1970, 1, 1)
         body_value_simple = [

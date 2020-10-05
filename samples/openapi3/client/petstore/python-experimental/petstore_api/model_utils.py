@@ -1449,33 +1449,37 @@ def model_to_dict(model_instance, serialize=True):
     """
     result = {}
 
-    model_instances = [model_instance]
-    if model_instance._composed_schemas:
-        model_instances.extend(model_instance._composed_instances)
-    for model_instance in model_instances:
-        for attr, value in model_instance._data_store.items():
-            if serialize:
-                # we use get here because additional property key names do not
-                # exist in attribute_map
-                attr = model_instance.attribute_map.get(attr, attr)
-            if isinstance(value, list):
-                result[attr] = list(map(
-                    lambda x: model_to_dict(x, serialize=serialize)
-                    if hasattr(x, '_data_store') else x, value
-                ))
-            elif isinstance(value, dict):
-                result[attr] = dict(map(
-                    lambda item: (item[0],
-                                  model_to_dict(item[1], serialize=serialize))
-                    if hasattr(item[1], '_data_store') else item,
-                    value.items()
-                ))
-            elif isinstance(value, ModelSimple):
-                result[attr] = value.value
-            elif hasattr(value, '_data_store'):
-                result[attr] = model_to_dict(value, serialize=serialize)
-            else:
-                result[attr] = value
+    if isinstance(model_instance, ModelNormal):
+        var_name_to_model_instances = get_var_name_to_model_instances(model_instance, [])
+    elif isinstance(model_instance, ModelComposed):
+        var_name_to_model_instances = model_instance._var_name_to_model_instances
+    else:
+        raise ApiValueError("Invalid input, pass in only instances of ModelNormal + ModelComposed")
+    for attr, value in model_instance._data_store.items():
+        if serialize:
+            model_instances = var_name_to_model_instances.get(attr, [model_instance])
+            model_inst = model_instances[0]
+            # we use get here because additional property key names do not
+            # exist in attribute_map if it is an additional property
+            attr = model_inst.attribute_map.get(attr, attr)
+        if isinstance(value, list):
+            result[attr] = list(map(
+                lambda x: model_to_dict(x, serialize=serialize)
+                if hasattr(x, '_data_store') else x, value
+            ))
+        elif isinstance(value, dict):
+            result[attr] = dict(map(
+                lambda item: (item[0],
+                              model_to_dict(item[1], serialize=serialize))
+                if hasattr(item[1], '_data_store') else item,
+                value.items()
+            ))
+        elif isinstance(value, ModelSimple):
+            result[attr] = value.value
+        elif hasattr(value, '_data_store'):
+            result[attr] = model_to_dict(value, serialize=serialize)
+        else:
+            result[attr] = value
 
     return result
 
@@ -1755,7 +1759,7 @@ def get_var_name_to_model_instances(self, composed_instances):
 
 def get_unused_args(self, composed_instances, model_args):
     unused_args = dict(model_args)
-    # arguments apssed to self were already converted to python names
+    # arguments passed to self were already converted to python names
     # before __init__ was called
     for var_name_py in self.attribute_map:
         if var_name_py in unused_args:
