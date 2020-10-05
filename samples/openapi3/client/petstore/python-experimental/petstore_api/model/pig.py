@@ -88,7 +88,10 @@ class Pig(ModelComposed):
             openapi_types (dict): The key is attribute name
                 and the value is attribute type.
         """
-        return {}
+        lazy_import()
+        return {
+            'class_name': (str,),
+        }
 
     @cached_property
     def discriminator():
@@ -101,7 +104,10 @@ class Pig(ModelComposed):
             return None
         return {'class_name': val}
 
-    attribute_map = {}
+    attribute_map = {
+        'class_name': 'className',  # noqa: E501
+    }
+
 
     required_properties = set([
         '_data_store',

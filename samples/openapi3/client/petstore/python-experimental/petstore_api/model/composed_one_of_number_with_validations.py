@@ -88,14 +88,18 @@ class ComposedOneOfNumberWithValidations(ModelComposed):
             openapi_types (dict): The key is attribute name
                 and the value is attribute type.
         """
-        return {}
+        lazy_import()
+        return {
+        }
 
     @cached_property
     def discriminator():
         return None
 
 
-    attribute_map = {}
+    attribute_map = {
+    }
+
 
     required_properties = set([
         '_data_store',
@@ -113,10 +117,7 @@ class ComposedOneOfNumberWithValidations(ModelComposed):
     def __init__(self, *args, **kwargs):  # noqa: E501
         """ComposedOneOfNumberWithValidations - a model defined in OpenAPI
 
-        Args:
-
         Keyword Args:
-            class_name (str): defaults to nulltype.Null  # noqa: E501
             _check_type (bool): if True, values for parameters in openapi_types
                                 will be type checked and a TypeError will be
                                 raised if the wrong type is input.
@@ -147,10 +148,8 @@ class ComposedOneOfNumberWithValidations(ModelComposed):
                                 Animal class but this time we won't travel
                                 through its discriminator because we passed in
                                 _visited_composed_classes = (Animal,)
-            color (str): [optional] if omitted the server will use the default value of "red"  # noqa: E501
         """
 
-        class_name = kwargs.get('class_name', nulltype.Null)
         _check_type = kwargs.pop('_check_type', True)
         _spec_property_naming = kwargs.pop('_spec_property_naming', False)
         _path_to_item = kwargs.pop('_path_to_item', ())
@@ -182,7 +181,6 @@ class ComposedOneOfNumberWithValidations(ModelComposed):
             '_visited_composed_classes': self._visited_composed_classes,
         }
         required_args = {
-            'class_name': class_name,
         }
         # remove args whose value is Null because they are unset
         required_arg_names = list(required_args.keys())

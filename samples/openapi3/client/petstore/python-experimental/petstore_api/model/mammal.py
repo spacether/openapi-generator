@@ -95,7 +95,13 @@ class Mammal(ModelComposed):
             openapi_types (dict): The key is attribute name
                 and the value is attribute type.
         """
-        return {}
+        lazy_import()
+        return {
+            'has_baleen': (bool,),
+            'has_teeth': (bool,),
+            'class_name': (str,),
+            'type': (str,),
+        }
 
     @cached_property
     def discriminator():
@@ -109,7 +115,13 @@ class Mammal(ModelComposed):
             return None
         return {'class_name': val}
 
-    attribute_map = {}
+    attribute_map = {
+        'has_baleen': 'hasBaleen',  # noqa: E501
+        'has_teeth': 'hasTeeth',  # noqa: E501
+        'class_name': 'className',  # noqa: E501
+        'type': 'type',  # noqa: E501
+    }
+
 
     required_properties = set([
         '_data_store',

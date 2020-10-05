@@ -88,7 +88,11 @@ class Quadrilateral(ModelComposed):
             openapi_types (dict): The key is attribute name
                 and the value is attribute type.
         """
-        return {}
+        lazy_import()
+        return {
+            'shape_type': (str,),
+            'quadrilateral_type': (str,),
+        }
 
     @cached_property
     def discriminator():
@@ -101,7 +105,11 @@ class Quadrilateral(ModelComposed):
             return None
         return {'quadrilateral_type': val}
 
-    attribute_map = {}
+    attribute_map = {
+        'shape_type': 'shapeType',  # noqa: E501
+        'quadrilateral_type': 'quadrilateralType',  # noqa: E501
+    }
+
 
     required_properties = set([
         '_data_store',
@@ -116,14 +124,14 @@ class Quadrilateral(ModelComposed):
     ])
 
     @convert_js_args_to_python_args
-    def __init__(self, quadrilateral_type, *args, **kwargs):  # noqa: E501
+    def __init__(self, shape_type, quadrilateral_type, *args, **kwargs):  # noqa: E501
         """Quadrilateral - a model defined in OpenAPI
 
         Args:
+            shape_type (str):
             quadrilateral_type (str):
 
         Keyword Args:
-            shape_type (str): defaults to nulltype.Null  # noqa: E501
             _check_type (bool): if True, values for parameters in openapi_types
                                 will be type checked and a TypeError will be
                                 raised if the wrong type is input.
@@ -156,7 +164,6 @@ class Quadrilateral(ModelComposed):
                                 _visited_composed_classes = (Animal,)
         """
 
-        shape_type = kwargs.get('shape_type', nulltype.Null)
         _check_type = kwargs.pop('_check_type', True)
         _spec_property_naming = kwargs.pop('_spec_property_naming', False)
         _path_to_item = kwargs.pop('_path_to_item', ())

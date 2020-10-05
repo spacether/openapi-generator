@@ -81,14 +81,26 @@ class FruitReq(ModelComposed):
             openapi_types (dict): The key is attribute name
                 and the value is attribute type.
         """
-        return {}
+        lazy_import()
+        return {
+            'cultivar': (str,),
+            'mealy': (bool,),
+            'length_cm': (float,),
+            'sweet': (bool,),
+        }
 
     @cached_property
     def discriminator():
         return None
 
 
-    attribute_map = {}
+    attribute_map = {
+        'cultivar': 'cultivar',  # noqa: E501
+        'mealy': 'mealy',  # noqa: E501
+        'length_cm': 'lengthCm',  # noqa: E501
+        'sweet': 'sweet',  # noqa: E501
+    }
+
 
     required_properties = set([
         '_data_store',
@@ -103,14 +115,14 @@ class FruitReq(ModelComposed):
     ])
 
     @convert_js_args_to_python_args
-    def __init__(self, *args, **kwargs):  # noqa: E501
+    def __init__(self, cultivar, length_cm, *args, **kwargs):  # noqa: E501
         """FruitReq - a model defined in OpenAPI
 
         Args:
+            cultivar (str):
+            length_cm (float):
 
         Keyword Args:
-            cultivar (str): defaults to nulltype.Null  # noqa: E501
-            length_cm (float): defaults to nulltype.Null  # noqa: E501
             _check_type (bool): if True, values for parameters in openapi_types
                                 will be type checked and a TypeError will be
                                 raised if the wrong type is input.
@@ -145,8 +157,6 @@ class FruitReq(ModelComposed):
             sweet (bool): [optional]  # noqa: E501
         """
 
-        cultivar = kwargs.get('cultivar', nulltype.Null)
-        length_cm = kwargs.get('length_cm', nulltype.Null)
         _check_type = kwargs.pop('_check_type', True)
         _spec_property_naming = kwargs.pop('_spec_property_naming', False)
         _path_to_item = kwargs.pop('_path_to_item', ())

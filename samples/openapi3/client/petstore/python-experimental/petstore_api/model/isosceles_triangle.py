@@ -83,8 +83,8 @@ class IsoscelesTriangle(ModelComposed):
         """
         lazy_import()
         return {
-            'shape_type': (str,),  # noqa: E501
-            'triangle_type': (str,),  # noqa: E501
+            'shape_type': (str,),
+            'triangle_type': (str,),
         }
 
     @cached_property
@@ -96,6 +96,7 @@ class IsoscelesTriangle(ModelComposed):
         'shape_type': 'shapeType',  # noqa: E501
         'triangle_type': 'triangleType',  # noqa: E501
     }
+
 
     required_properties = set([
         '_data_store',

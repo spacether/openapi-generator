@@ -90,8 +90,8 @@ class SimpleQuadrilateral(ModelComposed):
         """
         lazy_import()
         return {
-            'shape_type': (str,),  # noqa: E501
-            'quadrilateral_type': (str,),  # noqa: E501
+            'shape_type': (str,),
+            'quadrilateral_type': (str,),
         }
 
     @cached_property
@@ -103,6 +103,7 @@ class SimpleQuadrilateral(ModelComposed):
         'shape_type': 'shapeType',  # noqa: E501
         'quadrilateral_type': 'quadrilateralType',  # noqa: E501
     }
+
 
     required_properties = set([
         '_data_store',

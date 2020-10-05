@@ -90,8 +90,7 @@ class ChildCat(ModelComposed):
         """
         lazy_import()
         return {
-            'pet_type': (str,),  # noqa: E501
-            'name': (str,),  # noqa: E501
+            'name': (str,),
         }
 
     @cached_property
@@ -103,9 +102,9 @@ class ChildCat(ModelComposed):
         return {'pet_type': val}
 
     attribute_map = {
-        'pet_type': 'pet_type',  # noqa: E501
         'name': 'name',  # noqa: E501
     }
+
 
     required_properties = set([
         '_data_store',
@@ -120,11 +119,10 @@ class ChildCat(ModelComposed):
     ])
 
     @convert_js_args_to_python_args
-    def __init__(self, pet_type, *args, **kwargs):  # noqa: E501
+    def __init__(self, *args, **kwargs):  # noqa: E501
         """ChildCat - a model defined in OpenAPI
 
         Args:
-            pet_type (str):
 
         Keyword Args:
             _check_type (bool): if True, values for parameters in openapi_types
@@ -191,7 +189,6 @@ class ChildCat(ModelComposed):
             '_visited_composed_classes': self._visited_composed_classes,
         }
         required_args = {
-            'pet_type': pet_type,
         }
         # remove args whose value is Null because they are unset
         required_arg_names = list(required_args.keys())

@@ -13,23 +13,117 @@ class {{classname}}(ModelComposed):
 {{> python-experimental/model_templates/docstring_openapi_validations }}
     """
 
-{{> python-experimental/model_templates/classvars }}
+    allowed_values = {
+{{#vars}}
+{{#isEnum}}
+        ('{{name}}',): {
+{{#isNullable}}
+            'None': None,
+{{/isNullable}}
+{{#allowableValues}}
+{{#enumVars}}
+            '{{name}}': {{{value}}},
+{{/enumVars}}
+{{/allowableValues}}
+        },
+{{/isEnum}}
+{{/vars}}
+    }
 
-{{#oneOf}}
-{{#-first}}
-    attribute_map = {}
-{{/-first}}
-{{/oneOf}}
-{{^oneOf}}
-    attribute_map = {
+    validations = {
+{{#isAlias}}
+{{^isEnum}}
+{{^isArrayModel}}
+        ('value',): {
+{{> python-experimental/model_templates/validations }}
+{{/isArrayModel}}
+{{/isEnum}}
+{{/isAlias}}
 {{#requiredVars}}
-        '{{name}}': '{{baseName}}',  # noqa: E501
+{{#hasValidation}}
+        ('{{name}}',): {
+{{> python-experimental/model_templates/validations }}
+{{/hasValidation}}
 {{/requiredVars}}
 {{#optionalVars}}
-        '{{name}}': '{{baseName}}',  # noqa: E501
+{{#hasValidation}}
+        ('{{name}}',): {
+{{> python-experimental/model_templates/validations }}
+{{/hasValidation}}
 {{/optionalVars}}
     }
-{{/oneOf}}
+
+{{#additionalPropertiesType}}
+    @cached_property
+    def additional_properties_type():
+        """
+        This must be a method because a model may have properties that are
+        of type self, this must run after the class is loaded
+        """
+{{#imports}}
+{{#-first}}
+        lazy_import()
+{{/-first}}
+{{/imports}}
+        return ({{{additionalPropertiesType}}},)  # noqa: E501
+{{/additionalPropertiesType}}
+{{^additionalPropertiesType}}
+    additional_properties_type = None
+{{/additionalPropertiesType}}
+
+    _nullable = {{#isNullable}}True{{/isNullable}}{{^isNullable}}False{{/isNullable}}
+
+    @cached_property
+    def openapi_types():
+        """
+        This must be a method because a model may have properties that are
+        of type self, this must run after the class is loaded
+
+        Returns
+            openapi_types (dict): The key is attribute name
+                and the value is attribute type.
+        """
+{{#imports}}
+{{#-first}}
+        lazy_import()
+{{/-first}}
+{{/imports}}
+        return {
+{{#vars}}
+            '{{name}}': ({{{dataType}}},),
+{{/vars}}
+        }
+
+    @cached_property
+    def discriminator():
+{{^discriminator}}
+        return None
+{{/discriminator}}
+{{#discriminator}}
+{{#mappedModels}}
+{{#-first}}
+{{#imports}}
+{{#-first}}
+        lazy_import()
+{{/-first}}
+{{/imports}}
+{{/-first}}
+{{/mappedModels}}
+        val = {
+{{#mappedModels}}
+            '{{mappingName}}': {{{modelName}}},
+{{/mappedModels}}
+        }
+        if not val:
+            return None
+        return {'{{{discriminatorName}}}': val}{{/discriminator}}
+
+    attribute_map = {
+{{#vars}}
+        '{{name}}': '{{baseName}}',  # noqa: E501
+{{/vars}}
+    }
+
 
 {{> python-experimental/model_templates/method_init_composed }}
 

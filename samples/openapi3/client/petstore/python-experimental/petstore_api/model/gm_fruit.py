@@ -94,10 +94,10 @@ class GmFruit(ModelComposed):
         """
         lazy_import()
         return {
-            'color': (str,),  # noqa: E501
-            'cultivar': (str,),  # noqa: E501
-            'origin': (str,),  # noqa: E501
-            'length_cm': (float,),  # noqa: E501
+            'color': (str,),
+            'cultivar': (str,),
+            'origin': (str,),
+            'length_cm': (float,),
         }
 
     @cached_property
@@ -111,6 +111,7 @@ class GmFruit(ModelComposed):
         'origin': 'origin',  # noqa: E501
         'length_cm': 'lengthCm',  # noqa: E501
     }
+
 
     required_properties = set([
         '_data_store',
@@ -127,6 +128,8 @@ class GmFruit(ModelComposed):
     @convert_js_args_to_python_args
     def __init__(self, *args, **kwargs):  # noqa: E501
         """GmFruit - a model defined in OpenAPI
+
+        Args:
 
         Keyword Args:
             _check_type (bool): if True, values for parameters in openapi_types

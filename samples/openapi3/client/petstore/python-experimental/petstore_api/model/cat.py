@@ -31,10 +31,8 @@ from petstore_api.model_utils import (  # noqa: F401
 )
 
 def lazy_import():
-    from petstore_api.model.address import Address
     from petstore_api.model.animal import Animal
     from petstore_api.model.cat_all_of import CatAllOf
-    globals()['Address'] = Address
     globals()['Animal'] = Animal
     globals()['CatAllOf'] = CatAllOf
 
@@ -92,9 +90,7 @@ class Cat(ModelComposed):
         """
         lazy_import()
         return {
-            'class_name': (str,),  # noqa: E501
-            'declawed': (bool,),  # noqa: E501
-            'color': (str,),  # noqa: E501
+            'declawed': (bool,),
         }
 
     @cached_property
@@ -106,10 +102,9 @@ class Cat(ModelComposed):
         return {'class_name': val}
 
     attribute_map = {
-        'class_name': 'className',  # noqa: E501
         'declawed': 'declawed',  # noqa: E501
-        'color': 'color',  # noqa: E501
     }
+
 
     required_properties = set([
         '_data_store',
@@ -124,11 +119,10 @@ class Cat(ModelComposed):
     ])
 
     @convert_js_args_to_python_args
-    def __init__(self, class_name, *args, **kwargs):  # noqa: E501
+    def __init__(self, *args, **kwargs):  # noqa: E501
         """Cat - a model defined in OpenAPI
 
         Args:
-            class_name (str):
 
         Keyword Args:
             _check_type (bool): if True, values for parameters in openapi_types
@@ -162,7 +156,6 @@ class Cat(ModelComposed):
                                 through its discriminator because we passed in
                                 _visited_composed_classes = (Animal,)
             declawed (bool): [optional]  # noqa: E501
-            color (str): [optional] if omitted the server will use the default value of "red"  # noqa: E501
         """
 
         _check_type = kwargs.pop('_check_type', True)
@@ -196,7 +189,6 @@ class Cat(ModelComposed):
             '_visited_composed_classes': self._visited_composed_classes,
         }
         required_args = {
-            'class_name': class_name,
         }
         # remove args whose value is Null because they are unset
         required_arg_names = list(required_args.keys())
@@ -238,7 +230,6 @@ class Cat(ModelComposed):
           'anyOf': [
           ],
           'allOf': [
-              Address,
               Animal,
               CatAllOf,
           ],
