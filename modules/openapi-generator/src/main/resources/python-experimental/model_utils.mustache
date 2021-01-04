@@ -1,0 +1,2954 @@
+# coding: utf-8
+
+{{>partial_header}}
+
+from datetime import date, datetime  # noqa: F401
+import inspect
+import io
+import os
+import pprint
+import re
+import tempfile
+import typing
+
+from dateutil.parser.isoparser import isoparser, _takes_ascii
+
+from {{packageName}}.exceptions import (
+    ApiKeyError,
+    ApiAttributeError,
+    ApiTypeError,
+    ApiValueError,
+)
+from {{packageName}}.enums import (
+    CallFixer,
+    Enum,
+    get_new_enum
+)
+
+none_type = type(None)
+file_type = io.IOBase
+
+
+class cached_property(object):
+    # this caches the result of the function call for fn with no inputs
+    # use this as a decorator on function methods that you want converted
+    # into cached properties
+    def __init__(self, fn):
+        self._fn = fn
+
+    def __set_name__(self, owner, name):
+        # only works in python >= 3.6
+        self.name = name
+        self._cache_key = "_" + self.name
+
+    def __get__(self, instance, cls=None):
+        if self._cache_key in vars(self):
+            return vars(self)[self._cache_key]
+        else:
+            result = self._fn()
+            setattr(self, self._cache_key, result)
+            return result
+
+
+class class_property(object):
+    # this caches the result of the function call for fn with cls input
+    # use this as a decorator on function methods that you want converted
+    # into cached properties
+    # we cache the result for cls._method in cls.__method
+
+    def __init__(self, fn):
+        self._fn_name = "_" + fn.__name__
+        if not isinstance(fn, (classmethod, staticmethod)):
+            fn = classmethod(fn)
+        self._fn = fn
+
+    def __get__(self, obj, cls=None):
+        if cls is None:
+            cls = type(obj)
+        if (
+            self._fn_name in vars(cls) and
+            type(vars(cls)[self._fn_name]).__name__ != "class_property"
+        ):
+            return vars(cls)[self._fn_name]
+        else:
+            value = self._fn.__get__(obj, cls)()
+            setattr(cls, self._fn_name, value)
+            return value
+
+
+PRIMITIVE_TYPES = (list, float, int, bool, datetime, date, str, file_type)
+
+def allows_single_value_input(cls):
+    """
+    This function returns True if the input composed schema model or any
+    descendant model allows a value only input
+    This is true for cases where oneOf contains items like:
+    oneOf:
+      - float
+      - NumberWithValidation
+      - StringEnum
+      - ArrayModel
+      - null
+    TODO: lru_cache this
+    """
+    if (
+        issubclass(cls, Schema) or
+        cls in PRIMITIVE_TYPES
+    ):
+        return True
+    elif issubclass(cls, ModelComposed):
+        if not cls._composed_schemas['oneOf']:
+            return False
+        return any(allows_single_value_input(c) for c in cls._composed_schemas['oneOf'])
+    return False
+
+def composed_model_input_classes(cls):
+    """
+    This function returns a list of the possible models that can be accepted as
+    inputs.
+    TODO: lru_cache this
+    """
+    if issubclass(cls, Schema) or cls in PRIMITIVE_TYPES:
+        return [cls]
+    elif issubclass(cls, DictSchema):
+        if cls.discriminator is None:
+            return [cls]
+        else:
+            return get_discriminated_classes(cls)
+    elif issubclass(cls, ModelComposed):
+        if not cls._composed_schemas['oneOf']:
+            return []
+        if cls.discriminator is None:
+            input_classes = []
+            for c in cls._composed_schemas['oneOf']:
+                input_classes.extend(composed_model_input_classes(c))
+            return input_classes
+        else:
+            return get_discriminated_classes(cls)
+    return []
+
+
+inheritable_primitive_types = (int, float, str, date, datetime, list, dict)
+
+
+def constructed_with_inheritable_or_enum(cls):
+    if issubclass(cls, Enum) or issubclass(cls, inheritable_primitive_types):
+        return True
+    return False
+
+
+class OpenApiModel(metaclass=CallFixer):
+    """The base class for all OpenAPIModels"""
+
+
+class Schema(OpenApiModel):
+    """the parent class of models whose type != object in their
+    swagger/openapi
+
+    Use Cases:
+    1. enums
+    2. int/float/str/array etc
+    """
+
+    def __new__(cls, arg, **kwargs):
+        """
+        Schema __new__
+
+        Args:
+            arg (int/str/float/list/dict): the value
+
+        Kwargs:
+            _path_to_item (tuple): the path to the deserialized data
+                this is used when checking the data validations
+                and types and is included in error messages
+            _from_server (bool): if True then object properties must be passed
+                in using the spec property names
+                Note: a spec may have variable names which are invalid python variables like
+                "1variable". This example is invalid because it starts with a number
+                When ingesting data from the server, this is set to True
+        """
+        if "_path_to_item" not in kwargs:
+            kwargs["_path_to_item"] = ()
+        if "_configuration" not in kwargs:
+            kwargs["_configuration"] = None
+        if "_from_server" not in kwargs:
+            kwargs["_from_server"] = False
+        # TODO delete this enum code
+        """
+        if "_enum_name_by_value" in cls.__dict__ and "value" in kwargs and not args:
+            args = (kwargs.pop("value"),)
+        """
+        if constructed_with_inheritable_or_enum(cls):
+            new_cls = cls
+        else:
+            """
+            PATH 1 - make a new dynamic class and return an instance of that class
+            We are making an instance of cls, but instead of making cls
+            make a new class, new_cls
+            which includes dynamic bases including cls
+            return an instance of that new class
+            """
+            _path_to_item = list(kwargs["_path_to_item"])
+            if isinstance(arg, list):
+                _path_to_item.append("list")
+                kwargs["_path_to_item"] = tuple(_path_to_item)
+            elif isinstance(arg, dict):
+                _path_to_item.append("dict")
+                kwargs["_path_to_item"] = tuple(_path_to_item)
+            new_cls = cls._validate(arg, **kwargs)
+
+        # PATH 2 - we have a Dynamic class and we are making an instance of it
+        if issubclass(new_cls, Enum):
+            return new_cls._new_enum(arg)
+        elif issubclass(new_cls, (list, dict)):
+            return super(Schema, new_cls).__new__(new_cls)
+        elif issubclass(new_cls, datetime):
+            # this must come before the date check because datetime subclasses date
+            iso_dt = new_cls._cast_to(arg, **kwargs)
+            return super(Schema, new_cls).__new__(
+                new_cls,
+                iso_dt.year,
+                iso_dt.month,
+                iso_dt.day,
+                iso_dt.hour,
+                iso_dt.minute,
+                iso_dt.second,
+                tzinfo=iso_dt.tzinfo
+            )
+        elif issubclass(new_cls, date):
+            iso_date = new_cls._cast_to(arg, **kwargs)
+            return super(Schema, new_cls).__new__(new_cls, iso_date.year, iso_date.month, iso_date.day)
+        # int, float, str cases
+        return super(Schema, new_cls).__new__(new_cls, arg)
+
+    @staticmethod
+    def _get_new_class_for_base_classes(cls, *args, **kwargs):
+        """
+        DictSchema discriminator logic uses this
+        ComposedSchema logic uses this
+        """
+        if (hasattr(cls, '_composed_schemas') or hasattr(cls, '_discriminator')):
+            # validate is called inside _validate
+            return cls._validate(*args, **kwargs)
+        cls._validate(*args, **kwargs)
+        return cls
+
+
+def combine_validations(self_validations, other_validations, err_prefix="") -> dict:
+    # first gather keys unique to both dictionaries and set them in combined_validations
+    self_keys = set(self_validations)
+    other_keys = set(other_validations)
+    sym_dif_keys = self_keys.symmetric_difference(other_keys)
+    combined_validations = {key: self_validations.get(key, other_validations.get(key)) for key in sym_dif_keys}
+
+    # then combine validations that exist in both dictionaries
+    intersection_validation_keys = self_keys.intersection(other_keys)
+    for validation_key in intersection_validation_keys:
+        self_validation_value = self_validations[validation_key]
+        other_validation_value = other_validations[validation_key]
+        if self_validation_value == other_validation_value:
+            combined_validations[validation_key] = self_validation_value
+            continue
+        combiner_fn = __validation_key_to_combiner_fn[validation_key]
+        combined_validations[validation_key] = combiner_fn(self_validation_value, other_validation_value)
+
+    # check of invalid inclusive combinations
+    var_pairs = [('max_length', 'min_length'), ('max_items', 'min_items'), ('inclusive_maximum', 'inclusive_minimum')]
+    for (max_var_name, min_var_name) in var_pairs:
+        max_value = combined_validations.get(max_var_name)
+        min_value = combined_validations.get(min_var_name)
+        if (max_value is not None and min_value is not None and max_value < min_value):
+            raise ApiValueError(
+                '{}because {} {} is less than {} {}'.format(
+                    err_prefix,
+                    max_var_name,
+                    max_value,
+                    min_var_name,
+                    min_value
+                )
+            )
+
+    # check of invalid exclusive combinations
+    max_var_name = 'exclusive_maximum'
+    min_var_name = 'exclusive_minimum'
+    max_value = combined_validations.get(max_var_name)
+    min_value = combined_validations.get(min_var_name)
+    if (max_value is not None and min_value is not None and max_value <= min_value):
+        raise ApiValueError(
+            '{}because {} {} is less than or equal to {} {}'.format(
+                err_prefix,
+                max_var_name,
+                max_value,
+                min_var_name,
+                min_value
+            )
+        )
+    return combined_validations
+
+
+class TypedSchema(Schema):
+
+    _validations = {}
+    _nullable = False
+
+    __date_and_datetime_types = set([date, datetime])
+
+    @classmethod
+    def __init_subclass__(cls):
+        """This is called before class properties of the class being defined
+
+        When a single schema is a base class after this one, this class passes through property access to the base class
+        When there are multiple schema base classes, this gathers all properties in this class
+        combining validations, enum info, schemas
+        - _validations
+        - _types
+        - _enum_name_by_value
+        - _nullable
+        """
+        # shared schema properties
+        print('__init_subclass__ called in TypedSchema {}'.format(cls.__name__))
+        cls._types =  cls.__gather_types()
+        cls._validations = cls.__gather_validations()
+        _enum_name_by_value = cls.__gather_enum_name_by_value()
+        if _enum_name_by_value:
+            cls._enum_name_by_value = _enum_name_by_value
+        if none_type not in cls._types and hasattr(cls, '_nullable'):
+            cls._nullable = False
+
+    @classmethod
+    def __gather_types(cls):
+        base_classes = [c for c in cls.__bases__ if issubclass(c, TypedSchema) and c is not TypedSchema]
+        print('Base_classes {}\nChosen base_classes {}'.format(cls.__bases__, base_classes))
+        if not base_classes and issubclass(cls, Schema):
+            return cls._types
+        all_types = set(cls._types)
+        for i, base_class in enumerate(base_classes):
+            current_types = set(base_class._types)
+            new_all_types = all_types.intersection(current_types)
+            # if one side has str and the other side has date or datetime, keep date or datetime because
+            # in openapi date and datetimes are subtypes of str
+            if not new_all_types and current_types and all_types and str in current_types or str in all_types:
+                non_str_types = all_types if str in current_types else current_types
+                date_datetime_types = non_str_types.intersection(cls.__date_and_datetime_types)
+                if date_datetime_types:
+                    new_all_types.update(date_datetime_types)
+            if not new_all_types:
+                cls_references = [cls] + base_classes
+                raise ApiTypeError('Cannot combine schemas {} and {} in {} because their types do not intersect'.format(
+                    cls_references[i], cls_references[i+1], cls))
+            all_types = new_all_types
+
+        nullable_primitive_case = (none_type not in all_types and
+            getattr(cls, '_nullable', False) and len(base_classes) == 1)
+        if nullable_primitive_case:
+            # nullable StrSchema
+            all_types.add(none_type)
+            return tuple(all_types)
+
+        return tuple(all_types)
+
+    @classmethod
+    def __gather_validations(cls):
+        validation_classes = [c for c in cls.__mro__ if '_validations' in c.__dict__]
+        i = len(validation_classes) - 2
+        all_validations = validation_classes[-1]._validations
+        while i > -1:
+            current_validations = validation_classes[i]._validations
+            err_prefix = 'Cannot combine schemas {} and {} in {} '.format(
+                validation_classes[i], validation_classes[i+1], cls)
+            all_validations = combine_validations(current_validations, all_validations, err_prefix)
+            i -= 1
+        return all_validations
+
+    @classmethod
+    def __gather_enum_name_by_value(cls):
+        enum_classes = [c for c in cls.__mro__ if '_enum_name_by_value' in c.__dict__]
+        if not enum_classes:
+            return None
+        i = len(enum_classes) - 2
+        enum_info_by_value = enum_classes[-1]._enum_name_by_value
+        while i > -1:
+            current_enum_name_by_value = enum_classes[i]._enum_name_by_value
+            enum_info_by_value = combine_enum_name_by_value(current_enum_name_by_value, enum_info_by_value)
+            if not enum_info_by_value:
+                raise ApiValueError(
+                    'Cannot combine schemas {} and {} in {} because their enums do not intersect'.format(
+                        enum_classes[i], enum_classes[i+1], cls
+                    )
+                )
+            i -= 1
+        # TODO check the enum values to see if they pass validations
+        # TODO if they do not, remove them
+        # TODO if all are removed then raise an exception to users
+        return enum_info_by_value
+
+    @class_property
+    def _enum_by_value(cls):
+        """
+        # TODO move this into an EnumSchema class
+        This manufactures enum classes that include cls and the correct base class for the enum value
+        """
+        enum_classes = {}
+        if not hasattr(cls, "_enum_name_by_value"):
+            return enum_classes
+        for enum_value, enum_name in cls._enum_name_by_value.items():
+            base_class = type(enum_value)
+            if base_class in {none_type, bool}:
+                enum_classes[enum_value] = get_new_enum(
+                      "Dynamic" + cls.__name__, {enum_name: enum_value}, (cls,))
+            else:
+                enum_classes[enum_value] = get_new_enum(
+                    "Dynamic" + cls.__name__, {enum_name: enum_value}, (cls, base_class))
+        return enum_classes
+
+    @classmethod
+    def _new_enum(cls, *args):
+        if cls._member_map_:
+            # Enum has members, invoke Enum __new__
+            return super(Schema, cls).__new__(cls, args[0])
+        # mfg Enum class members
+        if isinstance(args[0],  (none_type, bool)):
+            inst = object.__new__(cls)
+        else:
+            # use super so we use str.__new__ etc
+            inst = super(Schema, cls).__new__(cls, args[0])
+        inst._value_ = args[0]
+        return inst
+
+    @class_property
+    def _class_by_base_class(cls):
+        classes = {}
+        cls_name = "Dynamic"+cls.__name__
+        for base_cls in cls._types:
+            if base_cls is list:
+                classes[list] = type(cls_name, (cls, list), {})
+            elif base_cls is bool:
+                classes[bool] = {
+                    True: get_new_enum(cls_name, {"TRUE": True}, (cls,)),
+                    False: get_new_enum(cls_name, {"FALSE": False}, (cls,))
+                }
+            elif base_cls is date:
+                classes[date] = type(cls_name, (cls, date), {})
+            elif base_cls is datetime:
+                classes[datetime] = type(cls_name, (cls, datetime), {})
+            elif base_cls is dict:
+                classes[dict] = type(cls_name, (cls, dict), {})
+            elif base_cls is float:
+                classes[float] = type(cls_name, (cls, float), {})
+            elif base_cls is int:
+                classes[int] = type(cls_name, (cls, int), {})
+            elif base_cls is str:
+                classes[str] = type(cls_name, (cls, str), {})
+            elif base_cls is none_type:
+                classes[none_type] = get_new_enum(cls_name, {"NONE": None}, (cls,))
+        return classes
+
+    @classmethod
+    def _validate(cls, *args, **kwargs):
+        """
+        TypedSchema _validate
+        Runs all schema validation logic and
+        returns a dynamic class of different bases depending upon the input
+        This makes it so:
+        - the returned instance is always a subclass of our defining schema
+            - this allows us to check type based on whether an instance is a subclass of a schema
+        - the returned instance is a serializable type (except for None, True, and False) which are enums
+
+        Required Steps:
+        1. verify type of input is valid vs the allowed _types
+        2. check validations that are applicable for this type of input
+        3. if enums exist, check that the value exists in the enum
+
+        Returns:
+            new_cls (type): the new class
+
+        Raises:
+            ApiValueError: when a string can't be converted into a date or datetime and it must be one of those classes
+            ApiTypeError: when the input type is not in the list of allowed spec types
+        """
+        arg = args[0]
+
+        _path_to_item = kwargs["_path_to_item"]
+        if not _path_to_item:
+            _path_to_item = ("args[0]",)
+
+        base_class = cls._validate_type(arg, _path_to_item)
+        cls._validate_validations_pass(arg, _path_to_item, kwargs["_configuration"])
+
+        if hasattr(cls, "_enum_name_by_value"):
+            cls._validate_enum_value(arg)
+            new_cls = cls._enum_by_value[arg]
+            return new_cls
+
+        if arg is None and getattr(cls, '_nullable', None):
+            return cls._class_by_base_class[none_type]
+        new_cls = cls._class_by_base_class[base_class]
+        if base_class is bool:
+            new_cls = new_cls[arg]
+        return new_cls
+
+    @classmethod
+    def _validate_type(cls, arg, _path_to_item):
+        """
+        Returns:
+        base_class: chosen base class for the input data
+
+        Raises:
+        ApiValueError, ApiTypeError
+        """
+
+        spec_classes = cls._types
+        _nullable = getattr(cls, '_nullable', None) is True
+        if _nullable:
+            if arg is None:
+                return none_type
+            if none_type not in spec_classes:
+                spec_classes += (none_type,)
+        arg_simple_class = get_simple_class(arg)
+        if arg_simple_class in spec_classes:
+            return arg_simple_class
+        elif arg_simple_class is str and date in spec_classes:
+            # coercion may be possible, we will attempt to cast into date later
+            return date
+        elif arg_simple_class is str and datetime in spec_classes:
+            # coercion may be possible, we will attempt to cast into datetime later
+            return datetime
+        raise get_type_error(arg, _path_to_item, spec_classes,
+                             key_type=False)
+
+    @classmethod
+    def _validate_validations_pass(cls, arg, _path_to_item, _configuration):
+        check_validations(cls._validations, _path_to_item, arg, configuration=_configuration)
+
+    @classmethod
+    def _validate_enum_value(cls, arg):
+        try:
+            new_cls = cls._enum_by_value[arg]
+        except KeyError:
+            raise ApiValueError("Invalid value {} passed in to {}, {}".format(arg, cls, cls._enum_by_value))
+
+
+def _get_discriminated_class_helper(_disc_property_name, disc, super_inst, **kwargs):
+    if _disc_property_name is None:
+        _disc_property_name = list(disc.keys())[0]
+    disc_property_name = list(disc.keys())[0]
+    disc_prop_value = kwargs[_disc_property_name]
+    if _disc_property_name in disc:
+        discriminated_cls = disc[_disc_property_name].get(disc_prop_value)
+        if discriminated_cls is not None:
+            return discriminated_cls
+        else:
+            try:
+                return super_inst._get_discriminated_class(**kwargs)
+            except AttributeError:
+                return None
+    return None
+
+
+class ComposedSchema(TypedSchema):
+    """
+    types is an empty tuple because the actual types are determined by the contents of oneOf/anyOf/allOf
+    """
+    # TODO figure out what to do with dae and dateitm here
+    _types = (none_type, str, float, int, bool, list, dict, date, datetime)
+
+    def __new__(cls, *args, **kwargs):
+        """
+        ComposedScehma __new__
+        """
+        _path_to_item = kwargs.pop("_path_to_item", ())
+        _from_server = kwargs.pop("_from_server", False)
+        _configuration = kwargs.pop("_configuration", None)
+        if not args:
+            if not kwargs:
+                raise ApiTypeError('{} is missing required input data in args or kwargs'.format(cls.__name__))
+            args = (kwargs, )
+        return super().__new__(
+            cls,
+            args[0],
+            _path_to_item=_path_to_item,
+            _from_server=_from_server,
+            _configuration=_configuration,
+        )
+
+    @classmethod
+    def __ensure_discriminator_value_present(cls, disc_property_name, *args, **kwargs):
+        if not args or args and disc_property_name not in args[0]:
+            # The input data does not contain the discriminator property
+            _path_to_item = kwargs.get('_path_to_item', ())
+            raise ApiValueError(
+                "Cannot deserialize input data due to missing discriminator. "
+                "The discriminator property '{}' is missing at path: {}".format(disc_property_name, _path_to_item)
+            )
+
+    @classmethod
+    def __get_allof_classes(cls, *args, **kwargs):
+        allof_classes = []
+        for allof_cls in cls._composed_schemas['allOf']:
+            if allof_cls in kwargs['_base_classes']:
+                continue
+            allof_new_cls = cls._get_new_class_for_base_classes(allof_cls, *args, **kwargs)
+            allof_classes.append(allof_new_cls)
+        return allof_classes
+
+    @classmethod
+    def __get_oneof_class(cls, discriminated_cls, *args, **kwargs):
+        oneof_classes = []
+        chosen_oneof_cls = None
+        for oneof_cls in cls._composed_schemas['oneOf']:
+            if oneof_cls in kwargs['_base_classes']:
+                continue
+            if isinstance(args[0], oneof_cls):
+                # passed in instance is the correct type
+                oneof_new_cls = args[0].__class__
+                chosen_oneof_cls = oneof_new_cls
+                oneof_classes.append(oneof_new_cls)
+                continue
+            try:
+                oneof_new_cls = cls._get_new_class_for_base_classes(oneof_cls, *args, **kwargs)
+            except (ApiValueError, ApiTypeError) as ex:
+                if discriminated_cls is not None and oneof_cls is discriminated_cls:
+                    raise ex
+                continue
+            chosen_oneof_cls = oneof_new_cls
+            oneof_classes.append(oneof_new_cls)
+        if not oneof_classes:
+            raise ApiValueError(
+                "Invalid inputs given to generate an instance of {}. None "
+                "of the oneOf schemas matched the input data.".format(cls)
+            )
+        elif len(oneof_classes) > 1:
+            raise ApiValueError(
+                "Invalid inputs given to generate an instance of {}. Multiple "
+                "oneOf schemas {} matched the inputs, but a max of one is allowed.".format(cls, oneof_classes)
+            )
+        elif discriminated_cls is not None and not issubclass(chosen_oneof_cls, discriminated_cls):
+            raise ApiValueError(
+                "Invalid oneOf schema selected. The {} schema that passed validation is not the "
+                "discriminated schema {}".format(chosen_oneof_cls, discriminated_cls)
+            )
+        return oneof_classes[0]
+
+    @classmethod
+    def __get_anyof_classes(cls, discriminated_cls, *args, **kwargs):
+        anyof_classes = []
+        chosen_anyof_cls = None
+        for anyof_cls in cls._composed_schemas['anyOf']:
+            if anyof_cls in kwargs['_base_classes']:
+                continue
+            try:
+                anyof_new_cls = cls._get_new_class_for_base_classes(anyof_cls, *args, **kwargs)
+            except (ApiValueError, ApiTypeError) as ex:
+                if discriminated_cls is not None and anyof_cls is discriminated_cls:
+                    raise ex
+                continue
+            chosen_anyof_cls = anyof_new_cls
+            anyof_classes.append(anyof_new_cls)
+        if not anyof_classes:
+            raise ApiValueError(
+                "Invalid inputs given to generate an instance of {}. None "
+                "of the anyOf schemas matched the input data.".format(cls)
+            )
+        elif discriminated_cls is not None and not issubclass(chosen_anyof_cls, discriminated_cls):
+            raise ApiValueError(
+                "Invalid oneOf schema selected. The {} schema that passed validation is not the "
+                "discriminated schema {}".format(chosen_anyof_cls, discriminated_cls)
+            )
+        return anyof_classes
+
+    @classmethod
+    def _validate(cls, *args, **kwargs):
+        """
+        ComposedSchema _validate
+        We return dynamic classes of different bases depending upon the inputs
+        This makes it so:
+        - the returned instance is always a subclass of our defining schema
+            - this allows us to check type based on whether an instance is a subclass of a schema
+        - the returned instance is a serializable type (except for None, True, and False) which are enums
+
+        Returns:
+            new_cls (type): the new class
+
+        Raises:
+            ApiValueError: when a string can't be converted into a date or datetime and it must be one of those classes
+            ApiTypeError: when the input type is not in the list of allowed spec types
+        """
+        if args and isinstance(args[0], cls):
+            # an instance of the correct type was passed in
+            return args[0].__class__
+
+        if getattr(cls, '_nullable', False) and args[0] is None:
+            """
+            handles nullable composed schema
+            when ingesting a null, do not enforce composed schema constraints
+            TODO: remove this when we drop openapi v3.0 support
+            """
+            composed_new_cls = type('Dynamic'+cls.__name__, (cls, NoneSchema), {})
+            new_cls = super(NoneSchema, composed_new_cls)._validate(*args, **kwargs)
+            return new_cls
+
+        # validation checking on _types, _validations, and enums
+        super()._validate(*args, **kwargs)
+
+        _base_classes = kwargs.get('_base_classes', ())
+        _base_classes += (cls,)
+        kwargs['_base_classes'] = _base_classes
+        chosen_classes = []
+
+        # process composed schema
+        _discriminator = getattr(cls, '_discriminator', None)
+        discriminated_cls = None
+        null_case = args and args[0] is None
+        if _discriminator:
+            disc_property_name = list(_discriminator.keys())[0]
+            if not null_case:
+                cls.__ensure_discriminator_value_present(disc_property_name, *args, **kwargs)
+                # get discriminated_cls by looking at the dict in the current class
+                discriminated_cls = cls._get_discriminated_class(_disc_property_name=disc_property_name, **args[0])
+
+        if cls._composed_schemas['allOf']:
+            allof_classes = cls.__get_allof_classes(*args, **kwargs)
+            chosen_classes.extend(allof_classes)
+        if cls._composed_schemas['oneOf']:
+            oneof_class = cls.__get_oneof_class(discriminated_cls, *args, **kwargs)
+            chosen_classes.append(oneof_class)
+        if cls._composed_schemas['anyOf']:
+            anyof_classes = cls.__get_anyof_classes(discriminated_cls, *args, **kwargs)
+            chosen_classes.extend(anyof_classes)
+
+        print('BUILDING composed cls {}'.format('Dynamic'+cls.__name__))
+        value_txt = "for value={}".format(args[0]) if args else ""
+        print('CHOSEN_CLASSES {}{}'.format(chosen_classes, value_txt))
+
+        print('CHOSEN_BASES {}'.format([c.__bases__ for c in chosen_classes]))
+        composed_new_cls = type('Dynamic'+cls.__name__, (cls, *chosen_classes), {})
+        if _discriminator and discriminated_cls is None and not null_case:
+            # get discriminated_cls by looking at the dict in current + ancestor classes
+            discriminated_cls = composed_new_cls._get_discriminated_class(
+                _disc_property_name=disc_property_name, **args[0])
+            if discriminated_cls is None:
+                raise ApiValueError(
+                    "Invalid discriminator value '{}' was passed in to {}.{} Only the values {} are allowed at {}".format(
+                        args[0][disc_property_name],
+                        cls.__name__,
+                        disc_property_name,
+                        list(_discriminator[disc_property_name].keys()),
+                        kwargs['_path_to_item'] + (disc_property_name,)
+                    )
+                )
+
+                raise discriminator_exception
+            # TODO change this to a different error
+            assert issubclass(composed_new_cls, discriminated_cls)
+        if not constructed_with_inheritable_or_enum(composed_new_cls):
+            # composed_new_cls now includes a DictSchema XSchema etc. but may not include dict etc in __mro__
+            # so add that in here
+            schema_types = [
+                DictSchema,
+                ListSchema,
+                StrSchema,
+                IntSchema,
+                FloatSchema,
+                DateSchema,
+                DateTimeSchema,
+                BoolSchema,
+                FileSchema,
+                NoneSchema,
+            ]
+            for schema_type in schema_types:
+                if issubclass(composed_new_cls, schema_type):
+                    return super(schema_type, composed_new_cls)._validate(*args, **kwargs)
+        return composed_new_cls
+
+
+class ListSchema(TypedSchema):
+    _types = (list,)
+
+    @classmethod
+    def _cast_to(cls, arg, **kwargs):
+        if isinstance(arg, list):
+            return arg
+        elif cls._nullable and isinstance(arg, none_type):
+            return arg
+        raise ApiTypeError('cannot cast {} to list'.format(arg))
+
+    @classmethod
+    def __validate_items(cls, list_items, **kwargs):
+        """
+        Ensures that:
+        - values passed in for items are valid
+        Exceptions will be raised if:
+        - invalid arguments were passed in
+
+        Args:
+            arg: the input dict
+
+        Raises:
+            ApiTypeError - for missing required arguments, or for invalid properties
+        """
+        _path_to_item = kwargs.pop('_path_to_item', ('list',))
+
+        # if we have definitions for an items schema, use it
+        # otherwise accept anything
+        item_cls = getattr(cls, '_items', AnyTypeSchema)
+        for i, value in enumerate(list_items):
+            if not isinstance(value, item_cls):
+                item_kwargs = dict(kwargs)
+                item_kwargs["_path_to_item"] = _path_to_item + (i,)
+                item_cls._validate(value, **item_kwargs)
+
+    @classmethod
+    def _validate(cls, *args, **kwargs):
+        """
+        ListSchema _validate
+        We return dynamic classes of different bases depending upon the inputs
+        This makes it so:
+        - the returned instance is always a subclass of our defining schema
+            - this allows us to check type based on whether an instance is a subclass of a schema
+        - the returned instance is a serializable type (except for None, True, and False) which are enums
+
+        Returns:
+            new_cls (type): the new class
+
+        Raises:
+            ApiValueError: when a string can't be converted into a date or datetime and it must be one of those classes
+            ApiTypeError: when the input type is not in the list of allowed spec types
+        """
+        # TODO handle nullable
+        arg = args[0]
+        new_cls = super()._validate(*args, **kwargs)
+        if cls._nullable and arg is None:
+            return new_cls
+        _base_classes = kwargs.get('_base_classes', ())
+        if cls in _base_classes:
+            # we have already moved through this class so stop here
+            return new_cls
+        kwargs['_base_classes'] = _base_classes + (cls,)
+        cls.__validate_items(args[0], **kwargs)
+        return new_cls
+
+    def __init__(self, *args, **kwargs):
+        """
+        ListSchema __init__
+        """
+        if issubclass(self.__class__, Enum):
+            """
+            init is called for enum members, we store a nullable version of this class in
+            TypedSchema._class_by_base_class[NONE] = nullable enum
+            When we assign that, this init is called
+            """
+            return
+        _path_to_item = kwargs.pop('_path_to_item', ('list',))
+
+        list_items = args[0]
+        # if we have definitions for an items schema, use it
+        # otherwise accept anything
+        item_cls = getattr(self, '_items', AnyTypeSchema)
+        for i, value in enumerate(list_items):
+            if isinstance(value, item_cls):
+                list_items[i] = value
+                continue
+            item_kwargs = dict(kwargs)
+            item_kwargs["_path_to_item"] = _path_to_item + (i,)
+            new_value = item_cls(value, **item_kwargs)
+            list_items[i] = new_value
+
+        super().__init__(list_items)
+
+class StrSchema(TypedSchema):
+    _types = (str,)
+
+    @classmethod
+    def _cast_to(cls, arg, **kwargs):
+        if isinstance(arg, str):
+            return arg
+        elif cls._nullable and isinstance(arg, none_type):
+            return arg
+        raise ApiTypeError('cannot cast {} to str'.format(arg))
+
+
+class IntSchema(TypedSchema):
+    _types = (int,)
+
+    @classmethod
+    def _cast_to(cls, arg, **kwargs):
+        if isinstance(arg, int):
+            return arg
+        elif cls._nullable and isinstance(arg, none_type):
+            return arg
+        raise ApiTypeError('cannot cast {} to int'.format(arg))
+
+    @classmethod
+    def _validate(cls, *args, **kwargs):
+        """
+        IntSchema _validate
+        """
+        if not kwargs['_path_to_item']:
+            kwargs['_path_to_item'] += ('args[0]',)
+        cls._cast_to(args[0], **kwargs)
+        return super()._validate(*args, **kwargs)
+
+
+class FloatSchema(TypedSchema):
+    _types = (float,)
+
+    @classmethod
+    def _cast_to(cls, arg, **kwargs):
+        if isinstance(arg, float):
+            return arg
+        elif cls._nullable and isinstance(arg, none_type):
+            return arg
+        raise ApiTypeError('cannot cast {} to float'.format(arg))
+
+    @classmethod
+    def _validate(cls, *args, **kwargs):
+        """
+        FloatSchema _validate
+        """
+        if not kwargs['_path_to_item']:
+            kwargs['_path_to_item'] += ('args[0]',)
+        cls._cast_to(args[0], **kwargs)
+        return super()._validate(*args, **kwargs)
+
+
+class IntOrFloatSchema(ComposedSchema):
+    """
+    This is used for type: number with no format
+    Both integers AND floats are accepted
+    """
+    _types = (int, float)
+    _composed_schemas = {
+        'allOf': [],
+        'oneOf': [
+            IntSchema,
+            FloatSchema,
+        ],
+        'anyOf': [],
+    }
+
+    @classmethod
+    def _validate(cls, *args, **kwargs):
+        """
+        IntOrFloatSchema _validate
+        """
+        if not kwargs['_path_to_item']:
+            kwargs['_path_to_item'] += ('args[0]',)
+        try:
+            return super()._validate(*args, **kwargs)
+        except ApiValueError as ex:
+            if 'oneOf' in str(ex):
+                raise ApiTypeError('cannot cast {} to int or float'.format(args[0]))
+            raise ex
+
+
+class CustomIsoparser(isoparser):
+
+    @_takes_ascii
+    def parse_isodatetime(self, dt_str):
+        components, pos = self._parse_isodate(dt_str)
+        if len(dt_str) > pos:
+            if self._sep is None or dt_str[pos:pos + 1] == self._sep:
+                components += self._parse_isotime(dt_str[pos + 1:])
+            else:
+                raise ValueError('String contains unknown ISO components')
+
+        if len(components) > 3 and components[3] == 24:
+            components[3] = 0
+            return datetime(*components) + timedelta(days=1)
+
+        if len(components) <= 3:
+            raise ValueError('Value is not a datetime')
+
+        return datetime(*components)
+
+    @_takes_ascii
+    def parse_isodate(self, datestr):
+        components, pos = self._parse_isodate(datestr)
+
+        if len(datestr) > pos:
+            raise ValueError('String contains invalid time components')
+
+        if len(components) > 3:
+            raise ValueError('String contains invalid time components')
+
+        return date(*components)
+
+
+DEFAULT_ISOPARSER = CustomIsoparser()
+isoparse = DEFAULT_ISOPARSER.isoparse
+
+
+class DateSchema(TypedSchema):
+    _types = (date,)
+
+    @classmethod
+    def _cast_to(cls, arg, **kwargs):
+        _from_server = kwargs.get('_from_server', False)
+        if isinstance(arg, date):
+            return arg
+        elif cls._nullable and isinstance(arg, none_type):
+            return arg
+        elif isinstance(arg, str) and _from_server:
+            try:
+                return DEFAULT_ISOPARSER.parse_isodate(arg)
+            except ValueError as ex:
+                raise ApiValueError(
+                    "Value does not conform to the required ISO-8601 date format. "
+                    "Invalid value '{}' for type date at {}".format(arg, kwargs['_path_to_item'])
+                )
+        raise ApiTypeError(
+            "Invalid type. Required type is date and passed type was {} at {}".format(
+                type(arg).__name__, kwargs['_path_to_item'])
+        )
+
+    @classmethod
+    def _validate(cls, *args, **kwargs):
+        """
+        DateSchema _validate
+        """
+        if not kwargs['_path_to_item']:
+            kwargs['_path_to_item'] += ('args[0]',)
+        cls._cast_to(args[0], **kwargs)
+        return super()._validate(*args, **kwargs)
+
+
+class DateTimeSchema(TypedSchema):
+    _types = (datetime,)
+
+    @classmethod
+    def _cast_to(cls, arg, **kwargs):
+        _from_server = kwargs.get('_from_server', False)
+        if isinstance(arg, datetime):
+            return arg
+        elif cls._nullable and isinstance(arg, none_type):
+            return arg
+        elif isinstance(arg, str) and _from_server:
+            try:
+                return DEFAULT_ISOPARSER.parse_isodatetime(arg)
+            except ValueError as ex:
+                raise ApiValueError(
+                    "Value does not conform to the required ISO-8601 datetime format. "
+                    "Invalid value '{}' for type datetime at {}".format(arg, kwargs['_path_to_item'])
+                )
+        raise ApiTypeError(
+            "Invalid type. Required type is datetime and passed type was {} at {}".format(
+                type(arg).__name__, kwargs['_path_to_item'])
+        )
+
+    @classmethod
+    def _validate(cls, *args, **kwargs):
+        """
+        DateTimeSchema _validate
+        """
+        if not kwargs['_path_to_item']:
+            kwargs['_path_to_item'] += ('args[0]',)
+        cls._cast_to(args[0], **kwargs)
+        return super()._validate(*args, **kwargs)
+
+
+class BoolSchema(TypedSchema):
+    _types = (bool,)
+
+    @classmethod
+    def _cast_to(cls, arg, **kwargs):
+        if isinstance(arg, bool):
+            return arg
+        elif cls._nullable and isinstance(arg, none_type):
+            return arg
+        raise ApiTypeError('cannot cast {} to bool'.format(arg))
+
+
+class NoneSchema(TypedSchema):
+    _types = (none_type,)
+
+    @classmethod
+    def _cast_to(cls, arg, **kwargs):
+        if isinstance(arg, none_type):
+            return arg
+        raise ApiTypeError('cannot cast {} to none_type'.format(arg))
+
+
+class FileSchema(TypedSchema):
+    # TODO add file fix
+    _types = (str,)
+
+    @classmethod
+    def _cast_to(cls, arg, **kwargs):
+        # TODO fix
+        return arg
+
+
+class DictSchema(TypedSchema):
+    _types = (dict,)
+    __reserved_keys = {
+        '__module__', '__doc__', '_validations', '_discriminator', '_additional_properties',
+        '_nullable', '_types', '_property_names', '__class_by_base_class', '__dict__', '__weakref__',
+        '__required_property_names', '__objclass__', '_value_', '_required_property_names'
+    }
+    _property_names = set()
+    _required_property_names = set()
+
+    @cached_property
+    def _additional_properties():
+        return AnyTypeSchema
+
+    @classmethod
+    def _cast_to(cls, arg, **kwargs):
+        if isinstance(arg, dict):
+            return arg
+        elif cls._nullable and isinstance(arg, none_type):
+            return arg
+        raise ApiTypeError('cannot cast {} to dict'.format(arg))
+
+    def __init__(self, *args, **kwargs):
+        """
+        DictSchema __init__, this is how properties are set
+        """
+        cls = self.__class__
+        if issubclass(cls, Enum):
+            """
+            init is called for enum members, we store a nullable version of this class in
+            TypedSchema._class_by_base_class[NONE] = nullable enum
+            When we assign that, this init is called
+            """
+            return
+        dict_items = {}
+        # if we have definitions for property schemas convert values using it
+        # otherwise accept anything
+
+        input_dict = cls.__get_input_dict(*args, **kwargs)
+
+        _path_to_item = input_dict.pop('_path_to_item', ('dict',))
+        _configuration = input_dict.pop('_configuration', None)
+        _from_server = input_dict.pop('_from_server', False)
+
+        for property_name_js, value in input_dict.items():
+            property_cls = getattr(cls, property_name_js, cls._additional_properties)
+            if isinstance(value, property_cls):
+                dict_items[property_name_js] = value
+                continue
+            property_kwargs = {}
+            property_kwargs["_path_to_item"] = _path_to_item + (property_name_js,)
+            property_kwargs["_configuration"] = _configuration
+            property_kwargs["_from_server"] = _from_server
+            new_value = property_cls(value, **property_kwargs)
+            dict_items[property_name_js] = new_value
+
+        dict.__init__(self, *args, **dict_items)
+
+    def __getattr__(self, name):
+        # TODO handle nullable case
+        # if an attribute does not exist
+        try:
+            return self[name]
+        except KeyError as ex:
+            raise AttributeError(str(ex))
+
+    def __getattribute__(self, name):
+        # TODO handle nullable case
+        # if an attribute does exist (for example as a class property but not as an instance method)
+        try:
+            return self[name]
+        except (KeyError, TypeError) as ex:
+            return super().__getattribute__(name)
+            # return object.__getattribute__(self, name)
+
+    def __setitem__(self, name, value):
+        """
+        set the value of an attribute using square-bracket notation: `instance[attr] = val`
+        TODO handle nullable
+        """
+        if name in self.__reserved_keys:
+            # used for setting enum properties
+            object.__setitem__(self, name, value)
+            return
+        var_cls = getattr(self.__class__, name, self._additional_properties)
+        if var_cls is None:
+            raise AttributeError("'{}' object has no attribute '{}'".format(self.__class__, name))
+        object.__setitem__(self, name, var_cls(value))
+
+    def __setattr__(self, name, value):
+        """
+        set the value of an attribute using dot notation: `instance.attr = val`
+        TODO handle nullable
+        """
+        if name in self.__reserved_keys:
+            # used for setting enum properties
+            object.__setattr__(self, name, value)
+            return
+        var_cls = getattr(self.__class__, name, self._additional_properties)
+        if var_cls is None:
+            raise AttributeError("'{}' object has no attribute '{}'".format(self.__class__, name))
+        object.__setattr__(self, name, var_cls(value))
+
+    @classmethod
+    def __init_subclass__(cls):
+        """
+        DictSchema
+        This is called before class properties of the class being defined
+
+        When a single schema is a base class after this one, this class passes through property access to the base class
+        When there are multiple schema base classes, this gathers all properties in this class
+        combining properties _additional_properties etc...
+        - _additional_properties
+        - cls properties
+        - _property_names
+        """
+        print('__init_subclass__ called in DictSchema')
+        super().__init_subclass__()
+        cls._additional_properties = cls.__gather_additional_properties()
+        cls.__create_property_schemas()
+        cls._property_names = cls.__gather_property_names()
+
+    @classmethod
+    def __gather_property_names(cls):
+        # TODO add condition to exclude classes with empty __dict__?
+        dict_schemas = [c for c in cls.__mro__ if
+                        issubclass(c, DictSchema) and c is not DictSchema and
+                        not issubclass(c, ComposedSchema)]
+        property_names = set(cls.__dict__) - cls.__reserved_keys
+        for dict_schema in dict_schemas:
+            property_names.update(set(dict_schema.__dict__) - cls.__reserved_keys)
+        property_names = list(property_names)
+        property_names.sort()
+        return tuple(property_names)
+
+    @classmethod
+    def __create_property_schemas(cls):
+        """ For each propertyName create one Schema from all base_schemaN.propertyName"""
+        # TODO improve the Dynamic omission
+        dict_schemas = [c for c in cls.__mro__ if
+                        issubclass(c, DictSchema) and c is not DictSchema and
+                        not issubclass(c, ComposedSchema) and
+                        not c.__name__.startswith('Dynamic')]
+        if len(dict_schemas) < 2:
+            return
+        property_names = set(cls.__dict__) - cls.__reserved_keys
+        for dict_schema in dict_schemas:
+            new_keys = set(dict_schema.__dict__) - cls.__reserved_keys
+            property_names.update(new_keys)
+        property_names = list(property_names)
+        property_names.sort()
+        no_additional_properties_allowed = cls._additional_properties is None
+        for property_name in property_names:
+            prop_present_in_schemas = []
+            prop_missing_from_schemas = []
+            property_schemas = []
+            for dict_schema in dict_schemas:
+                prop_schema = getattr(dict_schema, property_name, dict_schema._additional_properties)
+                if prop_schema is None:
+                    prop_missing_from_schemas.append(dict_schema)
+                else:
+                    prop_present_in_schemas.append(dict_schema)
+                    if prop_schema not in property_schemas:
+                        if prop_schema in NON_COMPOSED_SCHEMAS_SET:
+                            # other prop_schema could have these as base classes so put these on the end
+                            property_schemas.append(prop_schema)
+                        else:
+                            property_schemas.insert(0, prop_schema)
+            if prop_missing_from_schemas and no_additional_properties_allowed:
+                err_msg = (
+                    'Cannot combine schemas from {} and {} in {} because {} is '
+                    'missing from {}'.format(
+                        prop_present_in_schemas[-1],
+                        prop_missing_from_schemas,
+                        cls,
+                        property_name,
+                        prop_missing_from_schemas
+                    )
+                )
+                raise ApiTypeError(err_msg)
+            if len(property_schemas) == 1:
+                # all the schemas are the same, stay as-is
+                continue
+            if AnyTypeSchema in property_schemas and len(property_schemas) == 2:
+                # use the specific schema if we have AnyTypeSchema and SpecificSchema
+                specific_schema = property_schemas[not property_schemas.index(AnyTypeSchema)]
+                setattr(cls, property_name, specific_schema)
+                continue
+
+            new_schema = type(property_name, tuple(property_schemas), {})
+            setattr(cls, property_name, new_schema)
+
+    @classmethod
+    def __gather_additional_properties(cls):
+        dict_schemas = [c for c in cls.__mro__ if issubclass(c, DictSchema) and c is not DictSchema]
+        if not dict_schemas:
+            return None
+        i = len(dict_schemas) - 2
+        _additional_properties = dict_schemas[-1]._additional_properties
+        while i > -1:
+            current_additional_properties = dict_schemas[i]._additional_properties
+            if current_additional_properties is None and _additional_properties is None:
+                _additional_properties = None
+            elif current_additional_properties is None or _additional_properties is None:
+                err_msg = (
+                    'Cannot combine additionalProperties schemas from {} and {} in {} because additionalProperties does '
+                    'not exist in both schemas'.format(
+                        dict_schemas[i], dict_schemas[i+1], cls
+                    )
+                )
+                raise ApiTypeError(err_msg)
+            elif current_additional_properties is _additional_properties or _additional_properties is AnyTypeSchema:
+                _additional_properties = current_additional_properties
+            elif current_additional_properties is AnyTypeSchema:
+                # keep using _additional_properties
+                pass
+            else:
+                _additional_properties = type(
+                    '_additional_properties', (current_additional_properties, other_additional_properties), {})
+            i -= 1
+        return _additional_properties
+
+    @classmethod
+    def __validate_arg_presence(cls, arg):
+        """
+        Ensures that:
+        - all required arguments are passed in
+        - the input variable names are valid
+            - present in properties or
+            - accepted because additionalProperties exists
+        Exceptions will be raised if:
+        - invalid arguments were passed in
+            - a var_name is invalid if additionProperties == None and var_name not in _properties
+        - required properties were not passed in
+
+        Args:
+            arg: the input dict
+
+        Raises:
+            ApiTypeError - for missing required arguments, or for invalid properties
+        """
+        seen_required_properties = set()
+        invalid_arguments = []
+        for property_name in arg:
+            if property_name in cls._required_property_names:
+                seen_required_properties.add(property_name)
+            elif property_name in cls._property_names:
+                continue
+            elif cls._additional_properties:
+                continue
+            else:
+                invalid_arguments.append(property_name)
+        omitted_required_arguments = cls._required_property_names - seen_required_properties
+        missing_required_arguments = []
+        for property_name in omitted_required_arguments:
+            schema = getattr(cls, property_name)
+            missing_required_arguments.append(property_name)
+        if missing_required_arguments:
+            missing_required_arguments.sort()
+            raise ApiTypeError(
+                "{} is missing {} required argument{}: {}".format(
+                    cls.__name__,
+                    len(missing_required_arguments),
+                    "s" if len(missing_required_arguments) > 1 else "",
+                    missing_required_arguments
+                )
+            )
+        if invalid_arguments:
+            invalid_arguments.sort()
+            raise ApiTypeError(
+                "{} was passed {} invalid argument{}: {}".format(
+                    cls.__name__,
+                    len(invalid_arguments),
+                    "s" if len(invalid_arguments) > 1 else "",
+                    invalid_arguments
+                )
+            )
+
+    @classmethod
+    def __validate_args(cls, arg, **kwargs):
+        """
+        Ensures that:
+        - values passed in for properties are valid
+        Exceptions will be raised if:
+        - invalid arguments were passed in
+
+        Args:
+            arg: the input dict
+
+        Raises:
+            ApiTypeError - for missing required arguments, or for invalid properties
+        """
+        for property_name, value in arg.items():
+            if property_name in cls._required_property_names or property_name in cls._property_names:
+                schema = getattr(cls, property_name)
+            elif cls._additional_properties:
+                schema = cls._additional_properties
+            schema_kwargs = dict(kwargs)
+            schema_kwargs["_path_to_item"] += (property_name,)
+            schema_kwargs.pop("_base_classes", None)
+            schema._validate(value, **schema_kwargs)
+
+    @classmethod
+    def _validate(cls, *args, **kwargs):
+        """
+        DictSchema _validate
+        We return dynamic classes of different bases depending upon the inputs
+        This makes it so:
+        - the returned instance is always a subclass of our defining schema
+            - this allows us to check type based on whether an instance is a subclass of a schema
+        - the returned instance is a serializable type (except for None, True, and False) which are enums
+
+        Returns:
+            new_cls (type): the new class
+
+        Raises:
+            ApiValueError: when a string can't be converted into a date or datetime and it must be one of those classes
+            ApiTypeError: when the input type is not in the list of allowed spec types
+        """
+        arg = args[0]
+        new_cls = super()._validate(*args, **kwargs)
+        if cls._nullable and arg is None:
+            return new_cls
+        cls.__validate_arg_presence(args[0])
+        cls.__validate_args(args[0], **kwargs)
+        if arg is None and getattr(cls, '_nullable', None) is True:
+            return cls._class_by_base_class[none_type]
+        try:
+            _discriminator = cls._discriminator
+        except AttributeError:
+            return cls._class_by_base_class[dict]
+        # discriminator exists
+        disc_prop_name = list(_discriminator.keys())[0]
+        discriminated_cls = cls._get_discriminated_class(_disc_property_name=disc_prop_name, **args[0])
+        if discriminated_cls is None:
+            raise ApiValueError(
+                "Invalid discriminator value was passed in to {}.{} Only the values {} are allowed at {}".format(
+                    cls.__name__,
+                    disc_prop_name,
+                    list(_discriminator[disc_prop_name].keys()),
+                    kwargs['_path_to_item'] + (disc_prop_name,)
+                )
+            )
+        _base_classes = kwargs.get('_base_classes', ())
+        if discriminated_cls in _base_classes:
+            # we have already moved through this class so stop here
+            return cls._class_by_base_class[dict]
+        _base_classes += (cls,)
+        kwargs['_base_classes'] = _base_classes
+        discriminated_new_cls = cls._get_new_class_for_base_classes(discriminated_cls, *args, **kwargs)
+        new_cls = type('Dynamic'+cls.__name__, (cls, discriminated_new_cls), {})
+        return new_cls
+
+    @staticmethod
+    def __get_input_dict(*args, **kwargs):
+        input_dict = {}
+        if args:
+            input_dict.update(args[0])
+        if kwargs:
+            input_dict.update(kwargs)
+        return input_dict
+
+    def __new__(cls, *args, **kwargs):
+        """
+        DictSchema __new__
+        """
+        _path_to_item = kwargs.pop("_path_to_item", ())
+        _from_server = kwargs.pop("_from_server", False)
+        _configuration = kwargs.pop("_configuration", None)
+        if not kwargs and args and (constructed_with_inheritable_or_enum(cls) or cls._nullable):
+            """
+            Use cases:
+            1. cls is nullable and we are making an instance of it
+            2. we are making a dict and passing all the values in in a single dict in args[0]
+               after we have already constructed our dynamic class which contains dict
+            """
+            return super().__new__(
+                cls,
+                args[0],
+                _path_to_item=_path_to_item,
+                _from_server=_from_server,
+                _configuration=_configuration,
+            )
+        if args and not isinstance(args[0], dict):
+            raise ApiTypeError("{} object is not a dict".format(type(args[0])))
+        input_dict = cls.__get_input_dict(*args, **kwargs)
+        if not input_dict:
+            raise ApiTypeError('{} is missing required input data in args or kwargs'.format(cls.__name__))
+        return super().__new__(
+            cls,
+            input_dict,
+            _path_to_item=_path_to_item,
+            _from_server=_from_server,
+            _configuration=_configuration,
+        )
+
+NON_COMPOSED_SCHEMAS_SET = {
+    DictSchema,
+    ListSchema,
+    IntSchema,
+    FloatSchema,
+    DateSchema,
+    DateTimeSchema,
+    StrSchema,
+    BoolSchema,
+    # FileSchema,
+    NoneSchema,
+}
+
+class AnyTypeSchema(ComposedSchema):
+    """
+    StrSchema must be after DateSchema and DateTimeSchema, so when we call cast_to it invokes Date/DateTime
+    """
+
+    _composed_schemas =  {
+        'allOf': [],
+        'oneOf': [],
+        'anyOf': [
+            DictSchema,
+            ListSchema,
+            IntSchema,
+            FloatSchema,
+            DateSchema,
+            DateTimeSchema,
+            StrSchema,
+            BoolSchema,
+            # FileSchema,
+            NoneSchema,
+        ],
+    }
+
+
+class ModelComposed(OpenApiModel):
+    """
+    TODO delete this
+    """
+    pass
+
+
+COERCION_INDEX_BY_TYPE = {
+    ModelComposed: 0,
+    Schema: 2,
+    none_type: 3,    # The type of 'None'.
+    list: 4,
+    dict: 5,
+    float: 6,
+    int: 7,
+    bool: 8,
+    datetime: 9,
+    date: 10,
+    str: 11,
+    file_type: 12,   # 'file_type' is an alias for the built-in 'file' or 'io.IOBase' type.
+}
+
+# these are used to limit what type conversions we try to do
+# when we have a valid type already and we want to try converting
+# to another type
+UPCONVERSION_TYPE_PAIRS = (
+    (list, ModelComposed),
+    (dict, ModelComposed),
+    (str, ModelComposed),
+    (int, ModelComposed),
+    (float, ModelComposed),
+    (list, ModelComposed),
+    (str, Schema),
+    (int, Schema),
+    (float, Schema),
+    (list, Schema),
+)
+
+COERCIBLE_TYPE_PAIRS = {
+    False: (  # client instantiation of a model with client data
+        # (dict, ModelComposed),
+        # (list, ModelComposed),
+        # (str, Schema),
+        # (int, Schema),
+        # (float, Schema),
+        # (list, Schema),
+        # (str, int),
+        # (str, float),
+        # (str, datetime),
+        # (str, date),
+        # (int, str),
+        # (float, str),
+    ),
+    True: (  # server -> client data
+        (dict, ModelComposed),
+        (list, ModelComposed),
+        (dict, DictSchema),
+        (str, Schema),
+        (int, Schema),
+        (float, Schema),
+        (list, Schema),
+        (list, ListSchema),
+        # (str, int),
+        # (str, float),
+        (str, datetime),
+        (str, date),
+        (int, float),             # A float may be serialized as an integer, e.g. '3' is a valid serialized float.
+        # (int, str),
+        # (float, str),
+        (str, file_type)
+    ),
+}
+
+
+def get_simple_class(input_value):
+    """Returns an input_value's simple class that we will use for type checking
+
+    Args:
+        input_value (class/class_instance): the item for which we will return
+                                            the simple class
+    """
+    if isinstance(input_value, list):
+        return list
+    elif isinstance(input_value, dict):
+        return dict
+    elif isinstance(input_value, none_type):
+        return none_type
+    elif isinstance(input_value, file_type):
+        return file_type
+    elif isinstance(input_value, bool):
+        # this must be higher than the int check because
+        # isinstance(True, int) == True
+        return bool
+    elif isinstance(input_value, int):
+        return int
+    elif isinstance(input_value, float):
+        return float
+    elif isinstance(input_value, datetime):
+        # this must be higher than the date check because
+        # isinstance(datetime_instance, date) == True
+        return datetime
+    elif isinstance(input_value, date):
+        return date
+    elif isinstance(input_value, str):
+        return str
+    return type(input_value)
+
+
+def check_allowed_values(allowed_values, input_variable_path, input_values):
+    """Raises an exception if the input_values are not allowed
+
+    Args:
+        allowed_values (dict): the allowed_values dict
+        input_variable_path (tuple): the path to the input variable
+        input_values (list/str/int/float/date/datetime): the values that we
+            are checking to see if they are in allowed_values
+    """
+    these_allowed_values = list(allowed_values[input_variable_path].values())
+    if (isinstance(input_values, list)
+            and not set(input_values).issubset(
+                set(these_allowed_values))):
+        invalid_values = ", ".join(
+            map(str, set(input_values) - set(these_allowed_values))),
+        raise ApiValueError(
+            "Invalid values for `%s` [%s], must be a subset of [%s]" %
+            (
+                input_variable_path[0],
+                invalid_values,
+                ", ".join(map(str, these_allowed_values))
+            )
+        )
+    elif (isinstance(input_values, dict)
+            and not set(
+                input_values.keys()).issubset(set(these_allowed_values))):
+        invalid_values = ", ".join(
+            map(str, set(input_values.keys()) - set(these_allowed_values)))
+        raise ApiValueError(
+            "Invalid keys in `%s` [%s], must be a subset of [%s]" %
+            (
+                input_variable_path[0],
+                invalid_values,
+                ", ".join(map(str, these_allowed_values))
+            )
+        )
+    elif (not isinstance(input_values, (list, dict))
+            and input_values not in these_allowed_values):
+        raise ApiValueError(
+            "Invalid value for `%s` (%s), must be one of %s" %
+            (
+                input_variable_path[0],
+                input_values,
+                these_allowed_values
+            )
+        )
+
+
+def is_json_validation_enabled(schema_keyword, configuration=None):
+    """Returns true if JSON schema validation is enabled for the specified
+    validation keyword. This can be used to skip JSON schema structural validation
+    as requested in the configuration.
+
+    Args:
+        schema_keyword (string): the name of a JSON schema validation keyword.
+        configuration (Configuration): the configuration class.
+    """
+
+    return (configuration is None or
+        not hasattr(configuration, '_disabled_client_side_validations') or
+        schema_keyword not in configuration._disabled_client_side_validations)
+
+def raise_validation_error_message(value, constraint_msg, constraint_value, _path_to_item, additional_txt=""):
+    raise ApiValueError(
+        "Invalid value `{value}`, {constraint_msg} `{constraint_value}`{additional_txt} at {_path_to_item}".format(
+            value=value,
+            constraint_msg=constraint_msg,
+            constraint_value=constraint_value,
+            additional_txt=additional_txt,
+            _path_to_item=_path_to_item,
+        )
+    )
+
+
+def union_combiner(a, b):
+    return a + b
+
+
+__validation_key_to_combiner_fn = {
+    'max_length': min,
+    'min_length': max,
+    'max_items': min,
+    'min_items': max,
+    'exclusive_maximum': min,
+    'inclusive_maximum': min,
+    'exclusive_minimum': max,
+    'inclusive_minimum': max,
+    'regex': union_combiner,
+    'multiple_of': union_combiner,
+}
+
+
+def combine_enum_name_by_value(self_enum_name_by_value=None, other_enum_name_by_value=None) -> dict:
+    if self_enum_name_by_value is None and other_enum_name_by_value:
+        return other_enum_name_by_value
+    elif self_enum_name_by_value and other_enum_name_by_value is None:
+        return self_enum_name_by_value
+
+    new_enum_name_by_value = {}
+    # only user enums that exist in both dictionaries
+    intersection_enum_value_keys = set(self_enum_name_by_value).intersection(set(other_enum_name_by_value))
+    for enum_value_key in intersection_enum_value_keys:
+        self_enum_info = self_enum_name_by_value[enum_value_key]
+        other_enum_info = other_enum_name_by_value[enum_value_key]
+        if self_enum_info == other_enum_info:
+            new_enum_name_by_value[enum_value_key] = self_enum_info
+    return new_enum_name_by_value
+
+
+def check_validations(
+        validations, input_variable_path, input_values,
+        configuration=None):
+    """Raises an exception if the input_values are invalid
+
+    Args:
+        validations (dict): the validation dictionary for a specific schema or property
+        input_variable_path (tuple): the path to the input variable.
+        input_values (list/str/int/float/date/datetime): the values that we
+            are checking.
+        configuration (Configuration): the configuration class.
+    """
+    var_name = input_variable_path[-1]
+
+    if (is_json_validation_enabled('multipleOf', configuration) and 'multiple_of' in validations):
+        multiple_of_values = validations['multiple_of']
+        for multiple_of_value in multiple_of_values:
+            if (isinstance(input_values, (int, float)) and
+                not (float(input_values) / multiple_of_value).is_integer()
+            ):
+                # Note 'multipleOf' will be as good as the floating point arithmetic.
+                raise_validation_error_message(
+                    value=input_values,
+                    constraint_msg="value must be a multiple of",
+                    constraint_value=multiple_of_value,
+                    _path_to_item=input_variable_path
+                )
+
+    if (is_json_validation_enabled('maxLength', configuration) and
+            'max_length' in validations and
+            len(input_values) > validations['max_length']):
+        raise_validation_error_message(
+            value=input_values,
+            constraint_msg="length must be less than or equal to",
+            constraint_value=validations['max_length'],
+            _path_to_item=input_variable_path
+        )
+
+    if (is_json_validation_enabled('minLength', configuration) and
+            'min_length' in validations and
+            len(input_values) < validations['min_length']):
+        raise_validation_error_message(
+            value=input_values,
+            constraint_msg="length must be greater than or equal to",
+            constraint_value=validations['min_length'],
+            _path_to_item=input_variable_path
+        )
+
+    if (is_json_validation_enabled('maxItems', configuration) and
+            'max_items' in validations and
+            len(input_values) > validations['max_items']):
+        raise_validation_error_message(
+            value=input_values,
+            constraint_msg="number of items must be less than or equal to",
+            constraint_value=validations['max_items'],
+            _path_to_item=input_variable_path
+        )
+
+    if (is_json_validation_enabled('minItems', configuration) and
+            'min_items' in validations and
+            len(input_values) < validations['min_items']):
+        raise_validation_error_message(
+            value=input_values,
+            constraint_msg="number of items must be greater than or equal to",
+            constraint_value=validations['min_items'],
+            _path_to_item=input_variable_path
+        )
+
+    if (is_json_validation_enabled('maxProperties', configuration) and
+            'max_properties' in validations and
+            len(input_values) > validations['max_properties']):
+        raise_validation_error_message(
+            value=input_values,
+            constraint_msg="number of properties must be less than or equal to",
+            constraint_value=validations['max_properties'],
+            _path_to_item=input_variable_path
+        )
+
+    if (is_json_validation_enabled('minProperties', configuration) and
+            'min_properties' in validations and
+            len(input_values) < validations['min_properties']):
+        raise_validation_error_message(
+            value=input_values,
+            constraint_msg="number of properties must be greater than or equal to",
+            constraint_value=validations['min_properties'],
+            _path_to_item=input_variable_path
+        )
+
+    items = ('exclusive_maximum', 'inclusive_maximum', 'exclusive_minimum',
+             'inclusive_minimum')
+    if (any(item in validations for item in items)):
+        if isinstance(input_values, list):
+            max_val = max(input_values)
+            min_val = min(input_values)
+        elif isinstance(input_values, dict):
+            max_val = max(input_values.values())
+            min_val = min(input_values.values())
+        else:
+            max_val = input_values
+            min_val = input_values
+
+    if (is_json_validation_enabled('exclusiveMaximum', configuration) and
+            'exclusive_maximum' in validations and
+            max_val >= validations['exclusive_maximum']):
+        raise_validation_error_message(
+            value=input_values,
+            constraint_msg="must be a value less than",
+            constraint_value=validations['exclusive_maximum'],
+            _path_to_item=input_variable_path
+        )
+
+    if (is_json_validation_enabled('maximum', configuration) and
+            'inclusive_maximum' in validations and
+            max_val > validations['inclusive_maximum']):
+        raise_validation_error_message(
+            value=input_values,
+            constraint_msg="must be a value less than or equal to",
+            constraint_value=validations['inclusive_maximum'],
+            _path_to_item=input_variable_path
+        )
+
+    if (is_json_validation_enabled('exclusiveMinimum', configuration) and
+            'exclusive_minimum' in validations and
+            min_val <= validations['exclusive_minimum']):
+        raise_validation_error_message(
+            value=input_values,
+            constraint_msg="must be a value greater than",
+            constraint_value=validations['exclusive_maximum'],
+            _path_to_item=input_variable_path
+        )
+
+    if (is_json_validation_enabled('minimum', configuration) and
+            'inclusive_minimum' in validations and
+            min_val < validations['inclusive_minimum']):
+        raise_validation_error_message(
+            value=input_values,
+            constraint_msg="must be a value greater than or equal to",
+            constraint_value=validations['inclusive_minimum'],
+            _path_to_item=input_variable_path
+        )
+
+    checked_value = input_values
+    if isinstance(checked_value, (datetime, date)):
+        checked_value = checked_value.isoformat()
+    if (is_json_validation_enabled('pattern', configuration) and
+            'regex' in validations):
+        for regex_dict in validations['regex']:
+            flags = regex_dict.get('flags', 0)
+            if not re.search(regex_dict['pattern'], checked_value, flags=flags):
+                err_msg = r"Invalid value for `%s`, must match regular expression `%s`" % (
+                            var_name,
+                            regex_dict['pattern']
+                        )
+                if flags != 0:
+                    # Don't print the regex flags if the flags are not
+                    # specified in the OAS document.
+                    raise_validation_error_message(
+                        value=input_values,
+                        constraint_msg="must match regular expression",
+                        constraint_value=regex_dict['pattern'],
+                        _path_to_item=input_variable_path,
+                        additional_txt=" with flags=`{}`".format(flags)
+                    )
+                raise_validation_error_message(
+                    value=input_values,
+                    constraint_msg="must match regular expression",
+                    constraint_value=regex_dict['pattern'],
+                    _path_to_item=input_variable_path
+                )
+
+
+def order_response_types(required_types):
+    """Returns the required types sorted in coercion order
+
+    Args:
+        required_types (list/tuple): collection of classes or instance of
+            list or dict with class information inside it.
+
+    Returns:
+        (list): coercion order sorted collection of classes or instance
+            of list or dict with class information inside it.
+    """
+
+    def index_getter(class_or_instance):
+        if isinstance(class_or_instance, list):
+            return COERCION_INDEX_BY_TYPE[list]
+        elif isinstance(class_or_instance, dict):
+            return COERCION_INDEX_BY_TYPE[dict]
+        elif (inspect.isclass(class_or_instance)
+                and issubclass(class_or_instance, ModelComposed)):
+            return COERCION_INDEX_BY_TYPE[ModelComposed]
+        elif (inspect.isclass(class_or_instance)
+                and issubclass(class_or_instance, Schema)):
+            return COERCION_INDEX_BY_TYPE[Schema]
+        elif class_or_instance in COERCION_INDEX_BY_TYPE:
+            return COERCION_INDEX_BY_TYPE[class_or_instance]
+        raise ApiValueError("Unsupported type: %s" % class_or_instance)
+
+    sorted_types = sorted(
+        required_types,
+        key=lambda class_or_instance: index_getter(class_or_instance)
+    )
+    return sorted_types
+
+
+def remove_uncoercible(required_types_classes, current_item, spec_property_naming,
+                       must_convert=True):
+    """Only keeps the type conversions that are possible
+
+    Args:
+        required_types_classes (tuple): tuple of classes that are required
+                          these should be ordered by COERCION_INDEX_BY_TYPE
+        spec_property_naming (bool): True if the variable names in the input
+            data are serialized names as specified in the OpenAPI document.
+            False if the variables names in the input data are python
+            variable names in PEP-8 snake case.
+        current_item (any): the current item (input data) to be converted
+
+    Keyword Args:
+        must_convert (bool): if True the item to convert is of the wrong
+                          type and we want a big list of coercibles
+                          if False, we want a limited list of coercibles
+
+    Returns:
+        coercible_type (list): the remaining coercible required types, classes only
+        value_error (None/str): if conversion would result in a value error return it here
+    """
+    current_type_simple = get_simple_class(current_item)
+
+    results_classes = []
+    value_error = None
+    for required_type_class in required_types_classes:
+
+        if required_type_class == current_type_simple:
+            # don't consider converting to one's own class
+            continue
+
+        class_pair = (current_type_simple, required_type_class)
+        if must_convert and class_pair in COERCIBLE_TYPE_PAIRS[spec_property_naming]:
+            if current_type_simple == str and required_type_class in {date, datetime}:
+                try:
+                    isoparse(current_item)
+                except ValueError:
+                    req_class_name = "Date" if required_type_class == date else "Datetime"
+                    value_error = (
+                        "{} does not conform to the required ISO-8601 format. Invalid value '{}' for type {}".format(
+                            req_class_name, current_item, req_class_name.lower()
+                        )
+                    )
+                    continue
+            results_classes.append(required_type_class)
+    return results_classes, value_error
+
+def get_discriminated_classes(cls):
+    """
+    Returns all the classes that a discriminator converts to
+    TODO: lru_cache this
+    """
+    possible_classes = []
+    key = list(cls.discriminator.keys())[0]
+    if is_type_nullable(cls):
+        possible_classes.append(cls)
+    for discr_cls in cls.discriminator[key].values():
+        if hasattr(discr_cls, 'discriminator') and discr_cls.discriminator is not None:
+            possible_classes.extend(get_discriminated_classes(discr_cls))
+        else:
+            possible_classes.append(discr_cls)
+    return possible_classes
+
+
+def get_possible_classes(cls, from_server_context):
+    # TODO: lru_cache this
+    possible_classes = [cls]
+    if from_server_context:
+        return possible_classes
+    if hasattr(cls, 'discriminator') and cls.discriminator is not None:
+        possible_classes = []
+        possible_classes.extend(get_discriminated_classes(cls))
+    elif issubclass(cls, ModelComposed):
+        possible_classes.extend(composed_model_input_classes(cls))
+    return possible_classes
+
+
+def get_required_type_classes(required_types_mixed, spec_property_naming):
+    """Converts the tuple required_types into a tuple and a dict described
+    below
+
+    Args:
+        required_types_mixed (tuple/list): will contain either classes or
+            instance of list or dict
+        spec_property_naming (bool): if True these values came from the
+            server, and we use the data types in our endpoints.
+            If False, we are client side and we need to include
+            oneOf and discriminator classes inside the data types in our endpoints
+
+    Returns:
+        (valid_classes, dict_valid_class_to_child_types_mixed):
+            valid_classes (tuple): the valid classes that the current item
+                                   should be
+            dict_valid_class_to_child_types_mixed (dict):
+                valid_class (class): this is the key
+                child_types_mixed (list/dict/tuple): describes the valid child
+                    types
+    """
+    valid_classes = []
+    child_req_types_by_current_type = {}
+    for required_type in required_types_mixed:
+        if isinstance(required_type, list):
+            valid_classes.append(list)
+            child_req_types_by_current_type[list] = required_type
+        elif isinstance(required_type, tuple):
+            valid_classes.append(tuple)
+            child_req_types_by_current_type[tuple] = required_type
+        elif isinstance(required_type, dict):
+            valid_classes.append(dict)
+            child_req_types_by_current_type[dict] = required_type[str]
+        else:
+            valid_classes.extend(get_possible_classes(required_type, spec_property_naming))
+    return tuple(valid_classes), child_req_types_by_current_type
+
+
+def change_keys_js_to_python(input_dict, model_class):
+    """
+    Converts from javascript_key keys in the input_dict to python_keys in
+    the output dict using the mapping in model_class.
+    If the input_dict contains a key which does not declared in the model_class,
+    the key is added to the output dict as is. The assumption is the model_class
+    may have undeclared properties (additionalProperties attribute in the OAS
+    document).
+    """
+
+    if getattr(model_class, 'attribute_map', None) is None:
+        return input_dict
+    output_dict = {}
+    reversed_attr_map = {value: key for key, value in
+                         model_class.attribute_map.items()}
+    for javascript_key, value in input_dict.items():
+        python_key = reversed_attr_map.get(javascript_key)
+        if python_key is None:
+            # if the key is unknown, it is in error or it is an
+            # additionalProperties variable
+            python_key = javascript_key
+        output_dict[python_key] = value
+    return output_dict
+
+
+def get_type_error(var_value, path_to_item, valid_classes, key_type=False):
+    error_msg = type_error_message(
+        var_name=path_to_item[-1],
+        var_value=var_value,
+        valid_classes=valid_classes,
+        key_type=key_type
+    )
+    return ApiTypeError(
+        error_msg,
+        path_to_item=path_to_item,
+        valid_classes=valid_classes,
+        key_type=key_type
+    )
+
+
+def deserialize_primitive(data, klass, path_to_item):
+    """Deserializes string to primitive type.
+
+    :param data: str/int/float
+    :param klass: str/class the class to convert to
+
+    :return: int, float, str, bool, date, datetime
+    """
+    additional_message = ""
+    try:
+        if klass in {datetime, date}:
+            additional_message = (
+                "If you need your parameter to have a fallback "
+                "string value, please set its type as `type: {}` in your "
+                "spec. That allows the value to be any type. "
+            )
+            if klass == datetime:
+                if len(data) < 8:
+                    raise ValueError("This is not a datetime")
+                # The string should be in iso8601 datetime format.
+                parsed_datetime = isoparse(data)
+                date_only = (
+                    parsed_datetime.hour == 0 and
+                    parsed_datetime.minute == 0 and
+                    parsed_datetime.second == 0 and
+                    parsed_datetime.tzinfo is None and
+                    8 <= len(data) <= 10
+                )
+                if date_only:
+                    raise ValueError("This is a date, not a datetime")
+                return parsed_datetime
+            elif klass == date:
+                if len(data) < 8:
+                    raise ValueError("This is not a date")
+                return isoparse(data).date()
+        else:
+            converted_value = klass(data)
+            if isinstance(data, str) and klass == float:
+                if str(converted_value) != data:
+                    # '7' -> 7.0 -> '7.0' != '7'
+                    raise ValueError('This is not a float')
+            return converted_value
+    except (OverflowError, ValueError) as ex:
+        # parse can raise OverflowError
+        raise ApiValueError(
+            "{0}Failed to parse {1} as {2}".format(
+                additional_message, repr(data), klass.__name__
+            ),
+            path_to_item=path_to_item
+        ) from ex
+
+
+def get_discriminator_class(model_class,
+                            discr_name,
+                            discr_value, cls_visited):
+    """Returns the child class specified by the discriminator.
+
+    Args:
+        model_class (OpenApiModel): the model class.
+        discr_name (string): the name of the discriminator property.
+        discr_value (any): the discriminator value.
+        cls_visited (list): list of model classes that have been visited.
+            Used to determine the discriminator class without
+            visiting circular references indefinitely.
+
+    Returns:
+        used_model_class (class/None): the chosen child class that will be used
+            to deserialize the data, for example dog.Dog.
+            If a class is not found, None is returned.
+    """
+
+    if model_class in cls_visited:
+        # The class has already been visited and no suitable class was found.
+        return None
+    cls_visited.append(model_class)
+    used_model_class = None
+    if discr_name in model_class.discriminator:
+        class_name_to_discr_class = model_class.discriminator[discr_name]
+        used_model_class = class_name_to_discr_class.get(discr_value)
+    if used_model_class is None:
+        # We didn't find a discriminated class in class_name_to_discr_class.
+        # So look in the ancestor or descendant discriminators
+        # The discriminator mapping may exist in a descendant (anyOf, oneOf)
+        # or ancestor (allOf).
+        # Ancestor example: in the GrandparentAnimal -> ParentPet -> ChildCat
+        #   hierarchy, the discriminator mappings may be defined at any level
+        #   in the hierarchy.
+        # Descendant example:  mammal -> whale/zebra/Pig -> BasquePig/DanishPig
+        #   if we try to make BasquePig from mammal, we need to travel through
+        #   the oneOf descendant discriminators to find BasquePig
+        descendant_classes =  model_class._composed_schemas.get('oneOf', ()) + \
+            model_class._composed_schemas.get('anyOf', ())
+        ancestor_classes = model_class._composed_schemas.get('allOf', ())
+        possible_classes = descendant_classes + ancestor_classes
+        for cls in possible_classes:
+            # Check if the schema has inherited discriminators.
+            if hasattr(cls, 'discriminator') and cls.discriminator is not None:
+                used_model_class = get_discriminator_class(
+                                    cls, discr_name, discr_value, cls_visited)
+                if used_model_class is not None:
+                    return used_model_class
+    return used_model_class
+
+
+def deserialize_model(model_data, model_class, path_to_item, check_type,
+                      configuration, spec_property_naming):
+    """Deserializes model_data to model instance.
+
+    Args:
+        model_data (int/str/float/bool/none_type/list/dict): data to instantiate the model
+        model_class (OpenApiModel): the model class
+        path_to_item (list): path to the model in the received data
+        check_type (bool): whether to check the data tupe for the values in
+            the model
+        configuration (Configuration): the instance to use to convert files
+        spec_property_naming (bool): True if the variable names in the input
+            data are serialized names as specified in the OpenAPI document.
+            False if the variables names in the input data are python
+            variable names in PEP-8 snake case.
+
+    Returns:
+        model instance
+
+    Raise:
+        ApiTypeError
+        ApiValueError
+        ApiKeyError
+    """
+
+    kw_args = dict(
+       _check_type=check_type,
+       _path_to_item=path_to_item,
+       _configuration=configuration,
+       _from_server=spec_property_naming,
+    )
+
+    if issubclass(model_class, Schema):
+        return model_class(model_data, **kw_args)
+    elif isinstance(model_data, list):
+        return model_class(*model_data, **kw_args)
+    if isinstance(model_data, dict):
+        kw_args.update(model_data)
+        return model_class(**kw_args)
+    elif isinstance(model_data, PRIMITIVE_TYPES):
+        return model_class(model_data, **kw_args)
+
+
+def deserialize_file(response_data, configuration, content_disposition=None):
+    """Deserializes body to file
+
+    Saves response body into a file in a temporary folder,
+    using the filename from the `Content-Disposition` header if provided.
+
+    Args:
+        param response_data (str):  the file data to write
+        configuration (Configuration): the instance to use to convert files
+
+    Keyword Args:
+        content_disposition (str):  the value of the Content-Disposition
+            header
+
+    Returns:
+        (file_type): the deserialized file which is open
+            The user is responsible for closing and reading the file
+    """
+    fd, path = tempfile.mkstemp(dir=configuration.temp_folder_path)
+    os.close(fd)
+    os.remove(path)
+
+    if content_disposition:
+        filename = re.search(r'filename=[\'"]?([^\'"\s]+)[\'"]?',
+                             content_disposition).group(1)
+        path = os.path.join(os.path.dirname(path), filename)
+
+    with open(path, "wb") as f:
+        if isinstance(response_data, str):
+            # change str to bytes so we can write it
+            response_data = response_data.encode('utf-8')
+        f.write(response_data)
+
+    f = open(path, "rb")
+    return f
+
+
+def attempt_convert_item(input_value, valid_classes, path_to_item,
+                         configuration, spec_property_naming, key_type=False,
+                         must_convert=False, check_type=True):
+    """
+    Args:
+        input_value (any): the data to convert
+        valid_classes (any): the classes that are valid
+        path_to_item (list): the path to the item to convert
+        configuration (Configuration): the instance to use to convert files
+        spec_property_naming (bool): True if the variable names in the input
+            data are serialized names as specified in the OpenAPI document.
+            False if the variables names in the input data are python
+            variable names in PEP-8 snake case.
+        key_type (bool): if True we need to convert a key type (not supported)
+        must_convert (bool): if True we must convert
+        check_type (bool): if True we check the type or the returned data in
+            ModelComposed/Schema instances
+
+    Returns:
+        instance (any) the fixed item
+
+    Raises:
+        ApiTypeError
+        ApiValueError
+        ApiKeyError
+    """
+    valid_classes_ordered = order_response_types(valid_classes)
+    valid_classes_coercible, _err = remove_uncoercible(
+        valid_classes_ordered, input_value, spec_property_naming)
+    if not valid_classes_coercible or key_type:
+        # we do not handle keytype errors, json will take care
+        # of this for us
+        if configuration is None or not configuration.discard_unknown_keys:
+            raise get_type_error(input_value, path_to_item, valid_classes,
+                                 key_type=key_type)
+    for valid_class in valid_classes_coercible:
+        try:
+            if issubclass(valid_class, OpenApiModel):
+                return deserialize_model(input_value, valid_class,
+                                         path_to_item, check_type,
+                                         configuration, spec_property_naming)
+            elif valid_class == file_type:
+                return deserialize_file(input_value, configuration)
+            return deserialize_primitive(input_value, valid_class,
+                                         path_to_item)
+        except (ApiTypeError, ApiValueError, ApiKeyError) as conversion_exc:
+            if must_convert:
+                raise conversion_exc
+            # if we have conversion errors when must_convert == False
+            # we ignore the exception and move on to the next class
+            continue
+    # we were unable to convert, must_convert == False
+    return input_value
+
+
+def is_type_nullable(input_type):
+    """
+    Returns true if None is an allowed value for the specified input_type.
+
+    A type is nullable if at least one of the following conditions is true:
+    1. The OAS 'nullable' attribute has been specified,
+    1. The type is the 'null' type,
+    1. The type is a anyOf/oneOf composed schema, and a child schema is
+       the 'null' type.
+    Args:
+        input_type (type): the class of the input_value that we are
+            checking
+    Returns:
+        bool
+    """
+    if input_type is none_type:
+        return True
+    if issubclass(input_type, OpenApiModel) and input_type._nullable:
+        return True
+    if issubclass(input_type, ModelComposed):
+        # If oneOf/anyOf, check if the 'null' type is one of the allowed types.
+        for t in input_type._composed_schemas.get('oneOf', ()):
+            if is_type_nullable(t): return True
+        for t in input_type._composed_schemas.get('anyOf', ()):
+            if is_type_nullable(t): return True
+    return False
+
+
+def is_valid_type(input_class_simple, valid_classes):
+    """
+    Args:
+        input_class_simple (class): the class of the input_value that we are
+            checking
+        valid_classes (tuple): the valid classes that the current item
+            should be
+    Returns:
+        bool
+    """
+    valid_type = input_class_simple in valid_classes
+    if not valid_type and (
+            issubclass(input_class_simple, OpenApiModel) or
+            input_class_simple is none_type):
+        for valid_class in valid_classes:
+            if input_class_simple is none_type and is_type_nullable(valid_class):
+                # Schema is oneOf/anyOf and the 'null' type is one of the allowed types.
+                return True
+            if not (issubclass(valid_class, OpenApiModel) and valid_class.discriminator):
+                continue
+            discr_propertyname_py = list(valid_class.discriminator.keys())[0]
+            discriminator_classes = (
+                valid_class.discriminator[discr_propertyname_py].values()
+            )
+            valid_type = is_valid_type(input_class_simple, discriminator_classes)
+            if valid_type:
+                return True
+    return valid_type
+
+
+def validate_and_convert_types(input_value, required_types_mixed, path_to_item,
+                               spec_property_naming, _check_type, configuration=None):
+    """Raises a TypeError is there is a problem, otherwise returns value
+    # TODO remove this when composed schemas have been replaced w/ a new cls
+
+    Args:
+        input_value (any): the data to validate/convert
+        required_types_mixed (list/dict/tuple): A list of
+            valid classes, or a list tuples of valid classes, or a dict where
+            the value is a tuple of value classes
+        path_to_item: (list) the path to the data being validated
+            this stores a list of keys or indices to get to the data being
+            validated
+        spec_property_naming (bool): True if the variable names in the input
+            data are serialized names as specified in the OpenAPI document.
+            False if the variables names in the input data are python
+            variable names in PEP-8 snake case.
+        _check_type: (boolean) if true, type will be checked and conversion
+            will be attempted.
+        configuration: (Configuration): the configuration class to use
+            when converting file_type items.
+            If passed, conversion will be attempted when possible
+            If not passed, no conversions will be attempted and
+            exceptions will be raised
+
+    Returns:
+        the correctly typed value
+
+    Raises:
+        ApiTypeError
+    """
+    results = get_required_type_classes(required_types_mixed, spec_property_naming)
+    valid_classes, child_req_types_by_current_type = results
+
+    input_class_simple = get_simple_class(input_value)
+    valid_type = is_valid_type(input_class_simple, valid_classes)
+    if not valid_type:
+        if configuration:
+            # if input_value is not valid_type try to convert it
+            converted_instance = attempt_convert_item(
+                input_value,
+                valid_classes,
+                path_to_item,
+                configuration,
+                spec_property_naming,
+                key_type=False,
+                must_convert=True
+            )
+            return converted_instance
+        else:
+            raise get_type_error(input_value, path_to_item, valid_classes,
+                                 key_type=False)
+
+    # input_value's type is in valid_classes
+    if len(valid_classes) > 1 and configuration:
+        # there are valid classes which are not the current class
+        valid_classes_coercible, _err = remove_uncoercible(
+            valid_classes, input_value, spec_property_naming, must_convert=False)
+        if valid_classes_coercible:
+            converted_instance = attempt_convert_item(
+                input_value,
+                valid_classes_coercible,
+                path_to_item,
+                configuration,
+                spec_property_naming,
+                key_type=False,
+                must_convert=False
+            )
+            return converted_instance
+
+    if child_req_types_by_current_type == {}:
+        # all types are of the required types and there are no more inner
+        # variables left to look at
+        return input_value
+    inner_required_types = child_req_types_by_current_type.get(
+        type(input_value)
+    )
+    if inner_required_types is None:
+        # for this type, there are not more inner variables left to look at
+        return input_value
+    if isinstance(input_value, list):
+        if input_value == []:
+            # allow an empty list
+            return input_value
+        for index, inner_value in enumerate(input_value):
+            inner_path = list(path_to_item)
+            inner_path.append(index)
+            input_value[index] = validate_and_convert_types(
+                inner_value,
+                inner_required_types,
+                inner_path,
+                spec_property_naming,
+                _check_type,
+                configuration=configuration
+            )
+    elif isinstance(input_value, dict):
+        if input_value == {}:
+            # allow an empty dict
+            return input_value
+        for inner_key, inner_val in input_value.items():
+            inner_path = list(path_to_item)
+            inner_path.append(inner_key)
+            if get_simple_class(inner_key) != str:
+                raise get_type_error(inner_key, inner_path, valid_classes,
+                                     key_type=True)
+            input_value[inner_key] = validate_and_convert_types(
+                inner_val,
+                inner_required_types,
+                inner_path,
+                spec_property_naming,
+                _check_type,
+                configuration=configuration
+            )
+    return input_value
+
+
+def model_to_dict(model_instance, serialize=True):
+    """Returns the model properties as a dict
+
+    Args:
+        model_instance (one of your model instances): the model instance that
+            will be converted to a dict.
+
+    Keyword Args:
+        serialize (bool): if True, the keys in the dict will be values from
+            attribute_map
+    """
+    result = {}
+
+    model_instances = [model_instance]
+    if model_instance._composed_schemas:
+        model_instances.extend(model_instance._composed_instances)
+    for model_instance in model_instances:
+        for attr, value in model_instance._data_store.items():
+            if serialize:
+                # we use get here because additional property key names do not
+                # exist in attribute_map
+                attr = model_instance.attribute_map.get(attr, attr)
+            if isinstance(value, list):
+                result[attr] = list(map(
+                    lambda x: model_to_dict(x, serialize=serialize)
+                    if hasattr(x, '_data_store') else x, value
+                ))
+            elif isinstance(value, dict):
+                result[attr] = dict(map(
+                    lambda item: (item[0],
+                                  model_to_dict(item[1], serialize=serialize))
+                    if hasattr(item[1], '_data_store') else item,
+                    value.items()
+                ))
+            elif isinstance(value, Schema):
+                result[attr] = value.value
+            elif hasattr(value, '_data_store'):
+                result[attr] = model_to_dict(value, serialize=serialize)
+            else:
+                result[attr] = value
+
+    return result
+
+
+def type_error_message(var_value=None, var_name=None, valid_classes=None,
+                       key_type=None):
+    """
+    Keyword Args:
+        var_value (any): the variable which has the type_error
+        var_name (str): the name of the variable which has the typ error
+        valid_classes (tuple): the accepted classes for current_item's
+                                  value
+        key_type (bool): False if our value is a value in a dict
+                         True if it is a key in a dict
+                         False if our item is an item in a list
+    """
+    key_or_value = 'value'
+    if key_type:
+        key_or_value = 'key'
+    valid_classes_phrase = get_valid_classes_phrase(valid_classes)
+    msg = (
+        "Invalid type. Required {1} type {2} and "
+        "passed type was {3}".format(
+            var_name,
+            key_or_value,
+            valid_classes_phrase,
+            type(var_value).__name__,
+        )
+    )
+    return msg
+
+
+def get_valid_classes_phrase(input_classes):
+    """Returns a string phrase describing what types are allowed
+    """
+    all_classes = list(input_classes)
+    all_classes = sorted(all_classes, key=lambda cls: cls.__name__)
+    all_class_names = [cls.__name__ for cls in all_classes]
+    if len(all_class_names) == 1:
+        return 'is {0}'.format(all_class_names[0])
+    return "is one of [{0}]".format(", ".join(all_class_names))
+
+
+def convert_js_args_to_python_args(fn):
+    from functools import wraps
+    @wraps(fn)
+    def wrapped_init(self, *args, **kwargs):
+        spec_property_naming = kwargs.get('_from_server', False)
+        if spec_property_naming:
+            kwargs = change_keys_js_to_python(kwargs, self.__class__)
+        return fn(self, *args, **kwargs)
+    return wrapped_init
+
+
+def get_allof_instances(self, model_args, constant_args):
+    """
+    Args:
+        self: the class we are handling
+        model_args (dict): var_name to var_value
+            used to make instances
+        constant_args (dict): var_name to var_value
+            used to make instances
+
+    Returns
+        composed_instances (list)
+    """
+    composed_instances = []
+    for allof_class in self._composed_schemas['allOf']:
+
+        # no need to handle changing js keys to python because
+        # for composed schemas, allof parameters are included in the
+        # composed schema and were changed to python keys in __new__
+        # extract a dict of only required keys from fixed_model_args
+        kwargs = {}
+        var_names = set(allof_class.openapi_types.keys())
+        for var_name in var_names:
+            if var_name in model_args:
+                kwargs[var_name] = model_args[var_name]
+
+        # and use it to make the instance
+        kwargs.update(constant_args)
+        try:
+            allof_instance = allof_class(**kwargs)
+            composed_instances.append(allof_instance)
+        except Exception as ex:
+            raise ApiValueError(
+                "Invalid inputs given to generate an instance of '%s'. The "
+                "input data was invalid for the allOf schema '%s' in the composed "
+                "schema '%s'. Error=%s" % (
+                    allof_class.__name__,
+                    allof_class.__name__,
+                    self.__class__.__name__,
+                    str(ex)
+                )
+            ) from ex
+    return composed_instances
+
+
+def get_oneof_instance(cls, model_kwargs, constant_kwargs, model_arg=None):
+    """
+    Find the oneOf schema that matches the input data (e.g. payload).
+    If exactly one schema matches the input data, an instance of that schema
+    is returned.
+    If zero or more than one schema match the input data, an exception is raised.
+    In OAS 3.x, the payload MUST, by validation, match exactly one of the
+    schemas described by oneOf.
+
+    Args:
+        cls: the class we are handling
+        model_kwargs (dict): var_name to var_value
+            The input data, e.g. the payload that must match a oneOf schema
+            in the OpenAPI document.
+        constant_kwargs (dict): var_name to var_value
+            args that every model requires, including configuration, server
+            and path to item.
+
+    Kwargs:
+        model_arg: (int, float, bool, str, date, datetime, Schema, None):
+            the value to assign to a primitive class or Schema class
+            Notes:
+            - this is only passed in when oneOf includes types which are not object
+            - None is used to suppress handling of model_arg, nullable models are handled in __new__
+
+    Returns
+        oneof_instance (instance)
+    """
+    if len(cls._composed_schemas['oneOf']) == 0:
+        return None
+
+    oneof_instances = []
+    # Iterate over each oneOf schema and determine if the input data
+    # matches the oneOf schemas.
+    for oneof_class in cls._composed_schemas['oneOf']:
+        # The composed oneOf schema allows the 'null' type and the input data
+        # is the null value. This is a OAS >= 3.1 feature.
+        if oneof_class is none_type:
+            # skip none_types because we are deserializing dict data.
+            # none_type deserialization is handled in the __new__ method
+            continue
+
+        single_value_input = allows_single_value_input(oneof_class)
+
+        if not single_value_input:
+            # transform js keys from input data to python keys in fixed_model_args
+            fixed_model_args = change_keys_js_to_python(
+                model_kwargs, oneof_class)
+
+            # Extract a dict with the properties that are declared in the oneOf schema.
+            # Undeclared properties (e.g. properties that are allowed because of the
+            # additionalProperties attribute in the OAS document) are not added to
+            # the dict.
+            kwargs = {}
+            var_names = set(oneof_class.openapi_types.keys())
+            for var_name in var_names:
+                if var_name in fixed_model_args:
+                    kwargs[var_name] = fixed_model_args[var_name]
+
+            # do not try to make a model with no input args
+            if len(kwargs) == 0:
+                continue
+
+            # and use it to make the instance
+            kwargs.update(constant_kwargs)
+
+        try:
+            if not single_value_input:
+                oneof_instance = oneof_class(**kwargs)
+            else:
+                if issubclass(oneof_class, Schema):
+                    oneof_instance = oneof_class(model_arg, **constant_kwargs)
+                elif oneof_class in PRIMITIVE_TYPES:
+                    oneof_instance = validate_and_convert_types(
+                        model_arg,
+                        (oneof_class,),
+                        constant_kwargs['_path_to_item'],
+                        True,
+                        constant_kwargs['_check_type'],
+                        configuration=constant_kwargs['_configuration']
+                    )
+            oneof_instances.append(oneof_instance)
+        except Exception:
+            pass
+    if len(oneof_instances) == 0:
+        raise ApiValueError(
+            "Invalid inputs given to generate an instance of %s. None "
+            "of the oneOf schemas matched the input data." %
+            cls.__name__
+        )
+    elif len(oneof_instances) > 1:
+        raise ApiValueError(
+            "Invalid inputs given to generate an instance of %s. Multiple "
+            "oneOf schemas matched the inputs, but a max of one is allowed." %
+            cls.__name__
+        )
+    return oneof_instances[0]
+
+
+def get_anyof_instances(self, model_args, constant_args):
+    """
+    Args:
+        self: the class we are handling
+        model_args (dict): var_name to var_value
+            The input data, e.g. the payload that must match at least one
+            anyOf child schema in the OpenAPI document.
+        constant_args (dict): var_name to var_value
+            args that every model requires, including configuration, server
+            and path to item.
+
+    Returns
+        anyof_instances (list)
+    """
+    anyof_instances = []
+    if len(self._composed_schemas['anyOf']) == 0:
+        return anyof_instances
+
+    for anyof_class in self._composed_schemas['anyOf']:
+        # The composed oneOf schema allows the 'null' type and the input data
+        # is the null value. This is a OAS >= 3.1 feature.
+        if anyof_class is none_type:
+            # skip none_types because we are deserializing dict data.
+            # none_type deserialization is handled in the __new__ method
+            continue
+
+        # transform js keys to python keys in fixed_model_args
+        fixed_model_args = change_keys_js_to_python(model_args, anyof_class)
+
+        # extract a dict of only required keys from these_model_vars
+        kwargs = {}
+        var_names = set(anyof_class.openapi_types.keys())
+        for var_name in var_names:
+            if var_name in fixed_model_args:
+                kwargs[var_name] = fixed_model_args[var_name]
+
+        # do not try to make a model with no input args
+        if len(kwargs) == 0:
+            continue
+
+        # and use it to make the instance
+        kwargs.update(constant_args)
+        try:
+            anyof_instance = anyof_class(**kwargs)
+            anyof_instances.append(anyof_instance)
+        except Exception:
+            pass
+    if len(anyof_instances) == 0:
+        raise ApiValueError(
+            "Invalid inputs given to generate an instance of %s. None of the "
+            "anyOf schemas matched the inputs." %
+            self.__class__.__name__
+        )
+    return anyof_instances
+
+
+def get_additional_properties_model_instances(
+        composed_instances, self):
+    additional_properties_model_instances = []
+    all_instances = [self]
+    all_instances.extend(composed_instances)
+    for instance in all_instances:
+        if instance.additional_properties_type is not None:
+            additional_properties_model_instances.append(instance)
+    return additional_properties_model_instances
+
+
+def get_var_name_to_model_instances(self, composed_instances):
+    var_name_to_model_instances = {}
+    all_instances = [self]
+    all_instances.extend(composed_instances)
+    for instance in all_instances:
+        for var_name in instance.openapi_types:
+            if var_name not in var_name_to_model_instances:
+                var_name_to_model_instances[var_name] = [instance]
+            else:
+                var_name_to_model_instances[var_name].append(instance)
+    return var_name_to_model_instances
+
+
+def get_unused_args(self, composed_instances, model_args):
+    unused_args = dict(model_args)
+    # arguments apssed to self were already converted to python names
+    # before __init__ was called
+    for var_name_py in self.attribute_map:
+        if var_name_py in unused_args:
+            del unused_args[var_name_py]
+    for instance in composed_instances:
+        if instance.__class__ in self._composed_schemas['allOf']:
+            for var_name_py in instance.attribute_map:
+                if var_name_py in unused_args:
+                    del unused_args[var_name_py]
+        else:
+            for var_name_js in instance.attribute_map.values():
+                if var_name_js in unused_args:
+                    del unused_args[var_name_js]
+    return unused_args
+
+
+def validate_get_composed_info(constant_args, model_args, self):
+    """
+    For composed schemas, generate schema instances for
+    all schemas in the oneOf/anyOf/allOf definition. If additional
+    properties are allowed, also assign those properties on
+    all matched schemas that contain additionalProperties.
+    Openapi schemas are python classes.
+
+    Exceptions are raised if:
+    - 0 or > 1 oneOf schema matches the model_args input data
+    - no anyOf schema matches the model_args input data
+    - any of the allOf schemas do not match the model_args input data
+
+    Args:
+        constant_args (dict): these are the args that every model requires
+        model_args (dict): these are the required and optional spec args that
+            were passed in to make this model
+        self (class): the class that we are instantiating
+            This class contains self._composed_schemas
+
+    Returns:
+        composed_info (list): length three
+            composed_instances (list): the composed instances which are not
+                self
+            var_name_to_model_instances (dict): a dict going from var_name
+                to the model_instance which holds that var_name
+                the model_instance may be self or an instance of one of the
+                classes in self.composed_instances()
+            additional_properties_model_instances (list): a list of the
+                model instances which have the property
+                additional_properties_type. This list can include self
+    """
+    # create composed_instances
+    composed_instances = []
+    allof_instances = get_allof_instances(self, model_args, constant_args)
+    composed_instances.extend(allof_instances)
+    oneof_instance = get_oneof_instance(self.__class__, model_args, constant_args)
+    if oneof_instance is not None:
+        composed_instances.append(oneof_instance)
+    anyof_instances = get_anyof_instances(self, model_args, constant_args)
+    composed_instances.extend(anyof_instances)
+
+    # map variable names to composed_instances
+    var_name_to_model_instances = get_var_name_to_model_instances(
+        self, composed_instances)
+
+    # set additional_properties_model_instances
+    additional_properties_model_instances = (
+        get_additional_properties_model_instances(composed_instances, self)
+    )
+
+    # set any remaining values
+    unused_args = get_unused_args(self, composed_instances, model_args)
+    if len(unused_args) > 0 and \
+            len(additional_properties_model_instances) == 0 and \
+            (self._configuration is None or
+                not self._configuration.discard_unknown_keys):
+        raise ApiValueError(
+            "Invalid input arguments input when making an instance of "
+            "class %s. Not all inputs were used. The unused input data "
+            "is %s" % (self.__class__.__name__, unused_args)
+        )
+
+    # no need to add additional_properties to var_name_to_model_instances here
+    # because additional_properties_model_instances will direct us to that
+    # instance when we use getattr or setattr
+    # and we update var_name_to_model_instances in setattr
+
+    return [
+      composed_instances,
+      var_name_to_model_instances,
+      additional_properties_model_instances,
+      unused_args
+    ]
+
+
+def get_inheritance_chain_vars(cls, kwargs):
+    _required_interface_cls = kwargs.pop('_required_interface_cls', cls)
+    _inheritance_chain = kwargs.pop('_inheritance_chain', ())
+    inheritance_cycle = False
+    if cls in _inheritance_chain:
+        inheritance_cycle = True
+        return _required_interface_cls, _inheritance_chain, inheritance_cycle
+
+    _inheritance_chain = list(_inheritance_chain)
+    _inheritance_chain.append(cls)
+    _inheritance_chain = tuple(_inheritance_chain)
+    return _required_interface_cls, _inheritance_chain, inheritance_cycle
+
+
+def make_dynamic_class(*bases):
+    """
+    Returns a new DynamicBaseClasses class that is made with the subclasses bases
+    TODO: lru_cache this
+    Args:
+        bases (list): the base classes that DynamicBaseClasses inherits from
+    """
+    if issubclass(bases[-1], Enum):
+        # enum based classes
+        bases = list(bases)
+        source_enum = bases.pop()
+        assert issubclass(source_enum, Enum), "The last entry in bases must be a subclass of Enum"
+        source_enum_bases = source_enum.__bases__
+        assert (source_enum_bases[-1] is Enum), "The last entry in source_enum_bases must be Enum"
+        bases.extend(source_enum_bases)
+        # DynamicBaseClassesEnum cannot be used as a base class
+        class DynamicBaseClassesEnum(*bases):
+            for choice in source_enum:
+                # source_enum cannot be used as a base class, so copy its enum values into our new enum
+                locals()[choice.name] = choice.value
+        return DynamicBaseClassesEnum
+    # object based classes
+    class DynamicBaseClasses(*bases):
+        pass
+    return DynamicBaseClasses

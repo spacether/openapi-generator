@@ -34,6 +34,7 @@ public class CodegenParameter implements IJsonSchemaValidationProperties {
     public String nameInLowerCase; // property name in lower case
     public String example; // example value (x-example)
     public String jsonSchema;
+    public String indent;
     public boolean isString, isNumeric, isInteger, isLong, isNumber, isFloat, isDouble, isDecimal, isByteArray, isBinary,
             isBoolean, isDate, isDateTime, isUuid, isUri, isEmail, isFreeFormObject, isAnyType;
     public boolean isArray, isMap;
@@ -102,6 +103,7 @@ public class CodegenParameter implements IJsonSchemaValidationProperties {
     private Integer maxProperties;
     private Integer minProperties;
     public boolean isNull;
+    private CodegenComposedSchemas composedSchemas = null;
 
     public CodegenParameter copy() {
         CodegenParameter output = new CodegenParameter();
@@ -149,6 +151,7 @@ public class CodegenParameter implements IJsonSchemaValidationProperties {
         output.pattern = this.pattern;
         output.additionalProperties = this.additionalProperties;
         output.isNull = this.isNull;
+        output.indent = this.indent;
 
         if (this._enum != null) {
             output._enum = new ArrayList<String>(this._enum);
@@ -170,6 +173,9 @@ public class CodegenParameter implements IJsonSchemaValidationProperties {
         }
         if (this.vendorExtensions != null) {
             output.vendorExtensions = new HashMap<String, Object>(this.vendorExtensions);
+        }
+        if (this.composedSchemas != null) {
+            output.composedSchemas = this.composedSchemas;
         }
         output.hasValidation = this.hasValidation;
         output.isNullable = this.isNullable;
@@ -202,7 +208,7 @@ public class CodegenParameter implements IJsonSchemaValidationProperties {
 
     @Override
     public int hashCode() {
-        return Objects.hash(isFormParam, isQueryParam, isPathParam, isHeaderParam, isCookieParam, isBodyParam, isContainer, isCollectionFormatMulti, isPrimitiveType, isModel, isExplode, baseName, paramName, dataType, datatypeWithEnum, dataFormat, collectionFormat, description, unescapedDescription, baseType, defaultValue, enumName, style, example, jsonSchema, isString, isNumeric, isInteger, isLong, isNumber, isFloat, isDouble, isDecimal, isByteArray, isBinary, isBoolean, isDate, isDateTime, isUuid, isUri, isEmail, isFreeFormObject, isAnyType, isArray, isMap, isFile, isEnum, _enum, allowableValues, items, mostInnerItems, additionalProperties, vars, requiredVars, vendorExtensions, hasValidation, getMaxProperties(), getMinProperties(), isNullable, required, getMaximum(), getExclusiveMaximum(), getMinimum(), getExclusiveMinimum(), getMaxLength(), getMinLength(), getPattern(), getMaxItems(), getMinItems(), getUniqueItems(), contentType, multipleOf, isNull);
+        return Objects.hash(isFormParam, isQueryParam, isPathParam, isHeaderParam, isCookieParam, isBodyParam, isContainer, isCollectionFormatMulti, isPrimitiveType, isModel, isExplode, baseName, paramName, dataType, datatypeWithEnum, dataFormat, collectionFormat, description, unescapedDescription, baseType, defaultValue, enumName, style, example, jsonSchema, isString, isNumeric, isInteger, isLong, isNumber, isFloat, isDouble, isDecimal, isByteArray, isBinary, isBoolean, isDate, isDateTime, isUuid, isUri, isEmail, isFreeFormObject, isAnyType, isArray, isMap, isFile, isEnum, _enum, allowableValues, items, mostInnerItems, additionalProperties, vars, requiredVars, vendorExtensions, hasValidation, getMaxProperties(), getMinProperties(), isNullable, required, getMaximum(), getExclusiveMaximum(), getMinimum(), getExclusiveMinimum(), getMaxLength(), getMinLength(), getPattern(), getMaxItems(), getMinItems(), getUniqueItems(), contentType, multipleOf, isNull, indent, composedSchemas);
     }
 
     @Override
@@ -250,6 +256,8 @@ public class CodegenParameter implements IJsonSchemaValidationProperties {
                 getExclusiveMaximum() == that.getExclusiveMaximum() &&
                 getExclusiveMinimum() == that.getExclusiveMinimum() &&
                 getUniqueItems() == that.getUniqueItems() &&
+                Objects.equals(composedSchemas, that.composedSchemas) &&
+                Objects.equals(indent, that.indent) &&
                 Objects.equals(baseName, that.baseName) &&
                 Objects.equals(paramName, that.paramName) &&
                 Objects.equals(dataType, that.dataType) &&
@@ -361,6 +369,8 @@ public class CodegenParameter implements IJsonSchemaValidationProperties {
         sb.append(", contentType=").append(contentType);
         sb.append(", multipleOf=").append(multipleOf);
         sb.append(", isNull=").append(isNull);
+        sb.append(", indent=").append(indent);
+        sb.append(", composedSchemas=").append(composedSchemas);
         sb.append('}');
         return sb.toString();
     }
@@ -588,5 +598,38 @@ public class CodegenParameter implements IJsonSchemaValidationProperties {
 
     @Override
     public void setHasValidation(boolean hasValidation) { this.hasValidation = hasValidation; }
+
+    public String getIndent() {
+        return indent;
+    }
+
+    @Override
+    public void setIndent(String indent) {
+        this.indent = indent;
+    }
+
+    @Override
+    public boolean getHasVars() {
+        if (this.vars != null && this.vars.size() > 0) {
+            return true;
+        }
+        return false;
+    };
+
+    @Override
+    public boolean getHasRequiredVars() {
+        if (this.requiredVars != null && this.requiredVars.size() > 0) {
+            return true;
+        }
+        return false;
+    };
+
+    public void setComposedSchemas(CodegenComposedSchemas composedSchemas) {
+        this.composedSchemas = composedSchemas;
+    }
+
+    public CodegenComposedSchemas getComposedSchemas() {
+        return composedSchemas;
+    }
 }
 

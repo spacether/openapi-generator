@@ -1,0 +1,34 @@
+from {{packageName}}.model_utils import (  # noqa: F401
+{{#isArray}}
+{{#items}}
+{{^complexType}}
+{{#isAnyType}}
+{{^isEnum}}
+    AnyTypeSchema,
+{{/isEnum}}
+{{/isAnyType}}
+{{/complexType}}
+{{/items}}
+{{/isArray}}
+    ListSchema,
+    StrSchema,
+    IntSchema,
+    FloatSchema,
+    IntOrFloatSchema,
+    DateSchema,
+    DateTimeSchema,
+    BoolSchema,
+    FileSchema,
+    NoneSchema,
+    class_property,
+    cached_property,
+    isoparse,
+    none_type,
+)
+{{#imports}}
+{{#-first}}
+
+def lazy_import():
+{{/-first}}
+    {{{.}}}
+{{/imports}}

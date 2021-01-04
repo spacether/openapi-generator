@@ -98,4 +98,16 @@ public interface IJsonSchemaValidationProperties {
     boolean getHasValidation();
 
     void setHasValidation(boolean hasValidation);
+
+    String getIndent();
+
+    void setIndent(String indent);
+
+    boolean getHasVars();
+
+    boolean getHasRequiredVars();
+
+    CodegenComposedSchemas getComposedSchemas();
+
+    void setComposedSchemas(CodegenComposedSchemas composedSchemas);
 }
