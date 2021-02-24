@@ -2488,7 +2488,7 @@ public class DefaultCodegen implements CodegenConfig {
             } else {
                 // This line adds composed schema variables into model.vars
                 // vars are where we store a schema's properties
-                // per OAS properties are stored at the schema level only and do not include callOf/oneOf/anyOf properties
+                // per OAS properties are stored at the schema level only and do not include allOf/oneOf/anyOf properties
                 addVars(m, unaliasPropertySchema(properties), required, unaliasPropertySchema(allProperties), allRequired);
             }
 
