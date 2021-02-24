@@ -6111,6 +6111,23 @@ public class DefaultCodegen implements CodegenConfig {
     }
 
     private void addVarsRequiredVarsAdditionaProps(Schema schema, IJsonSchemaValidationProperties property){
+        if (schema instanceof ComposedSchema && supportsAdditionalPropertiesWithComposedSchema) {
+            // TODO add supportsAdditionalPropertiesWithComposedSchema
+            // if schema has properties outside of allOf/oneOf/anyOf also add them
+            ComposedSchema cs = (ComposedSchema) schema;
+            if (schema.getProperties() != null && !schema.getProperties().isEmpty()) {
+                if (cs.getOneOf() != null && !cs.getOneOf().isEmpty()) {
+                    LOGGER.warn("'oneOf' is intended to include only the additional optional OAS extension discriminator object. " +
+                            "For more details, see https://json-schema.org/draft/2019-09/json-schema-core.html#rfc.section.9.2.1.3 and the OAS section on 'Composition and Inheritance'.");
+                }
+                HashSet<String> requiredVars = new HashSet<>();
+                if (schema.getRequired() != null) {
+                    requiredVars.addAll(schema.getRequired());
+                }
+                addVars(property, property.getVars(), schema.getProperties(), requiredVars);
+            }
+            return;
+        }
         if (!"object".equals(schema.getType())) {
             return;
         }

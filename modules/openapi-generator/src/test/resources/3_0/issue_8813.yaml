@@ -32,4 +32,88 @@ components:
       allOf:
         - $ref: '#/components/schemas/ObjectWithABProps'
         - $ref: '#/components/schemas/ObjectWithCDProps'
+    ComposedOneOfWithProps:
+      properties:
+        e:
+          type: integer
+        f:
+          type: string
+      oneOf:
+        - $ref: '#/components/schemas/ObjectWithABProps'
+        - $ref: '#/components/schemas/ObjectWithCDProps'
+    ComposedAnyOfWithProps:
+      properties:
+        e:
+          type: integer
+        f:
+          type: string
+      anyOf:
+        - $ref: '#/components/schemas/ObjectWithABProps'
+        - $ref: '#/components/schemas/ObjectWithCDProps'
+    ComposedAllOfWithProps:
+      properties:
+        e:
+          type: integer
+        f:
+          type: string
+      allOf:
+        - $ref: '#/components/schemas/ObjectWithABProps'
+        - $ref: '#/components/schemas/ObjectWithCDProps'
+    OpjectWithPropsInObjectProps:
+      properties:
+        ObjectNoProps:
+          type: object
+        ObjectWithABProps:
+          type: object
+          properties:
+            a:
+              type: integer
+            b:
+              type: string
+        ObjectWithCDProps:
+          type: object
+          properties:
+            c:
+              type: integer
+            d:
+              type: string
+        ComposedOneOfNoProps:
+          oneOf:
+            - $ref: '#/components/schemas/ObjectWithABProps'
+            - $ref: '#/components/schemas/ObjectWithCDProps'
+        ComposedAnyOfNoProps:
+          anyOf:
+            - $ref: '#/components/schemas/ObjectWithABProps'
+            - $ref: '#/components/schemas/ObjectWithCDProps'
+        ComposedAllOfNoProps:
+          allOf:
+            - $ref: '#/components/schemas/ObjectWithABProps'
+            - $ref: '#/components/schemas/ObjectWithCDProps'
+        ComposedOneOfWithProps:
+          properties:
+            e:
+              type: integer
+            f:
+              type: string
+          oneOf:
+            - $ref: '#/components/schemas/ObjectWithABProps'
+            - $ref: '#/components/schemas/ObjectWithCDProps'
+        ComposedAnyOfWithProps:
+          properties:
+            e:
+              type: integer
+            f:
+              type: string
+          anyOf:
+            - $ref: '#/components/schemas/ObjectWithABProps'
+            - $ref: '#/components/schemas/ObjectWithCDProps'
+        ComposedAllOfWithProps:
+          properties:
+            e:
+              type: integer
+            f:
+              type: string
+          allOf:
+            - $ref: '#/components/schemas/ObjectWithABProps'
+            - $ref: '#/components/schemas/ObjectWithCDProps'
 paths: {}

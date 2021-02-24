@@ -48,6 +48,8 @@ import org.testng.Assert;
 import org.testng.TestNGAntTask.Mode;
 import org.testng.annotations.Test;
 
+import static org.testng.Assert.assertEquals;
+
 @SuppressWarnings("static-method")
 public class PythonClientTest {
 
@@ -465,4 +467,86 @@ public class PythonClientTest {
 
     }
 
+    @Test
+    public void testModelVarsCorrect() {
+        final OpenAPI openAPI = TestUtils.parseFlattenSpec("src/test/resources/3_0/issue_8813.yaml");
+        final DefaultCodegen codegen = new PythonClientCodegen();
+        codegen.setOpenAPI(openAPI);
+        codegen.setDisallowAdditionalPropertiesIfNotPresent(false);
+
+        String modelName;
+        Schema sc;
+        CodegenModel cm;
+
+        modelName = "ObjectNoProps";
+        sc = openAPI.getComponents().getSchemas().get(modelName);
+        cm = codegen.fromModel(modelName, sc);
+        assertEquals(cm.vars.size(), 0);
+
+        modelName = "ObjectWithABProps";
+        sc = openAPI.getComponents().getSchemas().get(modelName);
+        cm = codegen.fromModel(modelName, sc);
+        assertEquals(cm.vars.size(), 2);
+
+        modelName = "ObjectWithCDProps";
+        sc = openAPI.getComponents().getSchemas().get(modelName);
+        cm = codegen.fromModel(modelName, sc);
+        assertEquals(cm.vars.size(), 2);
+
+        modelName = "ComposedOneOfNoProps";
+        sc = openAPI.getComponents().getSchemas().get(modelName);
+        cm = codegen.fromModel(modelName, sc);
+        assertEquals(cm.vars.size(), 0);
+
+        modelName = "ComposedAnyOfNoProps";
+        sc = openAPI.getComponents().getSchemas().get(modelName);
+        cm = codegen.fromModel(modelName, sc);
+        assertEquals(cm.vars.size(), 0);
+
+        modelName = "ComposedAllOfNoProps";
+        sc = openAPI.getComponents().getSchemas().get(modelName);
+        cm = codegen.fromModel(modelName, sc);
+        assertEquals(cm.vars.size(), 0);
+        
+        modelName = "ComposedOneOfWithProps";
+        sc = openAPI.getComponents().getSchemas().get(modelName);
+        cm = codegen.fromModel(modelName, sc);
+        assertEquals(cm.vars.size(), 2);
+
+        modelName = "ComposedAnyOfWithProps";
+        sc = openAPI.getComponents().getSchemas().get(modelName);
+        cm = codegen.fromModel(modelName, sc);
+        assertEquals(cm.vars.size(), 2);
+
+        modelName = "ComposedAllOfWithProps";
+        sc = openAPI.getComponents().getSchemas().get(modelName);
+        cm = codegen.fromModel(modelName, sc);
+        assertEquals(cm.vars.size(), 2);
+    }
+
+    @Test
+    public void testPropertyVarsCorrect() {
+        final OpenAPI openAPI = TestUtils.parseFlattenSpec("src/test/resources/3_0/issue_8813.yaml");
+        final DefaultCodegen codegen = new PythonClientCodegen();
+        codegen.setOpenAPI(openAPI);
+        codegen.setDisallowAdditionalPropertiesIfNotPresent(false);
+
+        String modelName;
+        Schema sc;
+        CodegenModel cm;
+
+        modelName = "OpjectWithPropsInObjectProps";
+        sc = openAPI.getComponents().getSchemas().get(modelName);
+        cm = codegen.fromModel(modelName, sc);
+        assertEquals(cm.vars.get(0).vars.size(), 0); // ObjectNoProps
+        // these are complexTypes so vars will not be accurate
+        // assertEquals(cm.vars.get(1).vars.size(), 2); // ObjectWithABProps
+        // assertEquals(cm.vars.get(2).vars.size(), 2); // ObjectWithCDProps
+        assertEquals(cm.vars.get(3).vars.size(), 0); // ComposedOneOfNoProps
+        assertEquals(cm.vars.get(4).vars.size(), 0); // ComposedAnyOfNoProps
+        assertEquals(cm.vars.get(5).vars.size(), 0); // ComposedAllOfNoProps
+        assertEquals(cm.vars.get(6).vars.size(), 2); // ComposedOneOfWithProps
+        assertEquals(cm.vars.get(7).vars.size(), 2); // ComposedAnyOfWithProps
+        assertEquals(cm.vars.get(8).vars.size(), 2); // ComposedAllOfWithProps
+    }
 }
