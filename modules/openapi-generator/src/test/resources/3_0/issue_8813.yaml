@@ -1,0 +1,35 @@
+openapi: 3.0.0
+info:
+  title: foo
+  version: 1.0.0
+components:
+  schemas:
+    ObjectNoProps:
+      type: object
+    ObjectWithABProps:
+      type: object
+      properties:
+        a:
+          type: integer
+        b:
+          type: string
+    ObjectWithCDProps:
+      type: object
+      properties:
+        c:
+          type: integer
+        d:
+          type: string
+    ComposedOneOfNoProps:
+      oneOf:
+        - $ref: '#/components/schemas/ObjectWithABProps'
+        - $ref: '#/components/schemas/ObjectWithCDProps'
+    ComposedAnyOfNoProps:
+      anyOf:
+        - $ref: '#/components/schemas/ObjectWithABProps'
+        - $ref: '#/components/schemas/ObjectWithCDProps'
+    ComposedAllOfNoProps:
+      allOf:
+        - $ref: '#/components/schemas/ObjectWithABProps'
+        - $ref: '#/components/schemas/ObjectWithCDProps'
+paths: {}

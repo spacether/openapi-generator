@@ -2472,8 +2472,6 @@ public class DefaultCodegen implements CodegenConfig {
                 allRequired.addAll(composed.getRequired());
             }
 
-            addVars(m, unaliasPropertySchema(properties), required, unaliasPropertySchema(allProperties), allRequired);
-
             // Per OAS specification, composed schemas may use the 'additionalProperties' keyword.
             if (supportsAdditionalPropertiesWithComposedSchema) {
                 // Process the schema specified with the 'additionalProperties' keyword.
@@ -2487,6 +2485,11 @@ public class DefaultCodegen implements CodegenConfig {
                 // 'allOf' composed schemas, because these code generators also want to set
                 // 'Codegen.parent' to the first child schema of the 'allOf' schema.
                 addAdditionPropertiesToCodeGenModel(m, schema);
+            } else {
+                // This line adds composed schema variables into model.vars
+                // vars are where we store a schema's properties
+                // per OAS properties are stored at the schema level only and do not include callOf/oneOf/anyOf properties
+                addVars(m, unaliasPropertySchema(properties), required, unaliasPropertySchema(allProperties), allRequired);
             }
 
             if (Boolean.TRUE.equals(schema.getNullable())) {
