@@ -507,7 +507,7 @@ public class PythonClientTest {
         sc = openAPI.getComponents().getSchemas().get(modelName);
         cm = codegen.fromModel(modelName, sc);
         assertEquals(cm.vars.size(), 0);
-        
+
         modelName = "ComposedOneOfWithProps";
         sc = openAPI.getComponents().getSchemas().get(modelName);
         cm = codegen.fromModel(modelName, sc);

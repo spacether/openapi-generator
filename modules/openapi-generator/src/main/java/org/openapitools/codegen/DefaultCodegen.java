@@ -6112,7 +6112,6 @@ public class DefaultCodegen implements CodegenConfig {
 
     private void addVarsRequiredVarsAdditionaProps(Schema schema, IJsonSchemaValidationProperties property){
         if (schema instanceof ComposedSchema && supportsAdditionalPropertiesWithComposedSchema) {
-            // TODO add supportsAdditionalPropertiesWithComposedSchema
             // if schema has properties outside of allOf/oneOf/anyOf also add them
             ComposedSchema cs = (ComposedSchema) schema;
             if (schema.getProperties() != null && !schema.getProperties().isEmpty()) {
