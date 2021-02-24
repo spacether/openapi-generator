@@ -85,6 +85,14 @@ public interface IJsonSchemaValidationProperties {
 
     List<CodegenProperty> getVars();
 
+    /**
+     * This is where we store a schema's properties
+     * For a composed schema this should store any properties defined in the schema and should not include
+     * properties from oneOf/anyOf/allOf schemas
+     * It is possible to have both properties + oneOf/anyOf/allOf in a schema
+     * 
+     * @param vars the vars that we are setting
+     */
     void setVars(List<CodegenProperty> vars);
 
     List<CodegenProperty> getRequiredVars();
