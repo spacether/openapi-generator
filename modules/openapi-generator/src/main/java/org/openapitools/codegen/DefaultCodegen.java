@@ -2486,9 +2486,10 @@ public class DefaultCodegen implements CodegenConfig {
                 // 'Codegen.parent' to the first child schema of the 'allOf' schema.
                 addAdditionPropertiesToCodeGenModel(m, schema);
             } else {
-                // This line adds composed schema variables into model.vars
+                // This line adds composed schema oneOf/anyOf/allOf variables into model.vars
                 // vars are where we store a schema's properties
                 // per OAS properties are stored at the schema level only and do not include allOf/oneOf/anyOf properties
+                // This code path is non-complaint with the OAS / Json Schema spec
                 addVars(m, unaliasPropertySchema(properties), required, unaliasPropertySchema(allProperties), allRequired);
             }
 
