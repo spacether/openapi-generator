@@ -1575,7 +1575,6 @@ components:
     Cat:
       allOf:
         - $ref: '#/components/schemas/Animal'
-        - $ref: '#/components/schemas/Address'
         - type: object
           properties:
             declawed:
