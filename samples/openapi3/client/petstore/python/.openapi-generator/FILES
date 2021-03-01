@@ -206,5 +206,4 @@ setup.cfg
 setup.py
 test-requirements.txt
 test/__init__.py
-test/test_composed_schema_with_props_and_no_add_props.py
 tox.ini

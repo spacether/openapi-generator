@@ -1,6 +1,6 @@
 # Fruit
 
-a schema that tests oneOf
+a schema that tests oneOf and includes a schema level property
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
