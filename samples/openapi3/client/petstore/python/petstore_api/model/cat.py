@@ -88,9 +88,6 @@ class Cat(ModelComposed):
         """
         lazy_import()
         return {
-            'class_name': (str,),  # noqa: E501
-            'declawed': (bool,),  # noqa: E501
-            'color': (str,),  # noqa: E501
         }
 
     @cached_property
@@ -102,9 +99,6 @@ class Cat(ModelComposed):
         return {'class_name': val}
 
     attribute_map = {
-        'class_name': 'className',  # noqa: E501
-        'declawed': 'declawed',  # noqa: E501
-        'color': 'color',  # noqa: E501
     }
 
     required_properties = set([
@@ -120,11 +114,8 @@ class Cat(ModelComposed):
     ])
 
     @convert_js_args_to_python_args
-    def __init__(self, class_name, *args, **kwargs):  # noqa: E501
+    def __init__(self, *args, **kwargs):  # noqa: E501
         """Cat - a model defined in OpenAPI
-
-        Args:
-            class_name (str):
 
         Keyword Args:
             _check_type (bool): if True, values for parameters in openapi_types
@@ -157,8 +148,6 @@ class Cat(ModelComposed):
                                 Animal class but this time we won't travel
                                 through its discriminator because we passed in
                                 _visited_composed_classes = (Animal,)
-            declawed (bool): [optional]  # noqa: E501
-            color (str): [optional] if omitted the server will use the default value of "red"  # noqa: E501
         """
 
         _check_type = kwargs.pop('_check_type', True)
@@ -192,7 +181,6 @@ class Cat(ModelComposed):
             '_visited_composed_classes': self._visited_composed_classes,
         }
         required_args = {
-            'class_name': class_name,
         }
         model_args = {}
         model_args.update(required_args)

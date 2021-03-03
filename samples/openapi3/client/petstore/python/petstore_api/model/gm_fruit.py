@@ -61,17 +61,6 @@ class GmFruit(ModelComposed):
     }
 
     validations = {
-        ('cultivar',): {
-            'regex': {
-                'pattern': r'^[a-zA-Z\s]*$',  # noqa: E501
-            },
-        },
-        ('origin',): {
-            'regex': {
-                'pattern': r'^[A-Z\s]*$',  # noqa: E501
-                'flags': (re.IGNORECASE)
-            },
-        },
     }
 
     additional_properties_type = None
@@ -91,9 +80,6 @@ class GmFruit(ModelComposed):
         lazy_import()
         return {
             'color': (str,),  # noqa: E501
-            'cultivar': (str,),  # noqa: E501
-            'origin': (str,),  # noqa: E501
-            'length_cm': (float,),  # noqa: E501
         }
 
     @cached_property
@@ -103,9 +89,6 @@ class GmFruit(ModelComposed):
 
     attribute_map = {
         'color': 'color',  # noqa: E501
-        'cultivar': 'cultivar',  # noqa: E501
-        'origin': 'origin',  # noqa: E501
-        'length_cm': 'lengthCm',  # noqa: E501
     }
 
     required_properties = set([
@@ -156,9 +139,6 @@ class GmFruit(ModelComposed):
                                 through its discriminator because we passed in
                                 _visited_composed_classes = (Animal,)
             color (str): [optional]  # noqa: E501
-            cultivar (str): [optional]  # noqa: E501
-            origin (str): [optional]  # noqa: E501
-            length_cm (float): [optional]  # noqa: E501
         """
 
         _check_type = kwargs.pop('_check_type', True)

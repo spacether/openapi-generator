@@ -79,8 +79,6 @@ class ChildCat(ModelComposed):
         """
         lazy_import()
         return {
-            'pet_type': (str,),  # noqa: E501
-            'name': (str,),  # noqa: E501
         }
 
     @cached_property
@@ -92,8 +90,6 @@ class ChildCat(ModelComposed):
         return {'pet_type': val}
 
     attribute_map = {
-        'pet_type': 'pet_type',  # noqa: E501
-        'name': 'name',  # noqa: E501
     }
 
     required_properties = set([
@@ -109,11 +105,8 @@ class ChildCat(ModelComposed):
     ])
 
     @convert_js_args_to_python_args
-    def __init__(self, pet_type, *args, **kwargs):  # noqa: E501
+    def __init__(self, *args, **kwargs):  # noqa: E501
         """ChildCat - a model defined in OpenAPI
-
-        Args:
-            pet_type (str):
 
         Keyword Args:
             _check_type (bool): if True, values for parameters in openapi_types
@@ -146,7 +139,6 @@ class ChildCat(ModelComposed):
                                 Animal class but this time we won't travel
                                 through its discriminator because we passed in
                                 _visited_composed_classes = (Animal,)
-            name (str): [optional]  # noqa: E501
         """
 
         _check_type = kwargs.pop('_check_type', True)
@@ -180,7 +172,6 @@ class ChildCat(ModelComposed):
             '_visited_composed_classes': self._visited_composed_classes,
         }
         required_args = {
-            'pet_type': pet_type,
         }
         model_args = {}
         model_args.update(required_args)

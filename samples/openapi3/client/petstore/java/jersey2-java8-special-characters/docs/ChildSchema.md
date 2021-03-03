@@ -7,7 +7,6 @@ A schema that does not have any special character.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**prop1** | **String** |  |  [optional]
 
 
 

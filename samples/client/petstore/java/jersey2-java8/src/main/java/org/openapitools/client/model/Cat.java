@@ -17,15 +17,8 @@ import java.util.Objects;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.HashMap;
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import com.fasterxml.jackson.annotation.JsonTypeName;
-import com.fasterxml.jackson.annotation.JsonValue;
-import io.swagger.annotations.ApiModel;
-import io.swagger.annotations.ApiModelProperty;
 import org.openapitools.client.model.Animal;
 import org.openapitools.client.model.BigCat;
 import org.openapitools.client.model.CatAllOf;
@@ -37,7 +30,6 @@ import org.openapitools.client.JSON;
  * Cat
  */
 @JsonPropertyOrder({
-  Cat.JSON_PROPERTY_DECLAWED
 })
 @javax.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen")
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.EXISTING_PROPERTY, property = "className", visible = true)
@@ -46,33 +38,6 @@ import org.openapitools.client.JSON;
 })
 
 public class Cat extends Animal {
-  public static final String JSON_PROPERTY_DECLAWED = "declawed";
-  private Boolean declawed;
-
-
-  public Cat declawed(Boolean declawed) {
-    this.declawed = declawed;
-    return this;
-  }
-
-   /**
-   * Get declawed
-   * @return declawed
-  **/
-  @javax.annotation.Nullable
-  @ApiModelProperty(value = "")
-  @JsonProperty(JSON_PROPERTY_DECLAWED)
-  @JsonInclude(value = JsonInclude.Include.USE_DEFAULTS)
-
-  public Boolean getDeclawed() {
-    return declawed;
-  }
-
-
-  public void setDeclawed(Boolean declawed) {
-    this.declawed = declawed;
-  }
-
 
   /**
    * Return true if this Cat object is equal to o.
@@ -85,14 +50,12 @@ public class Cat extends Animal {
     if (o == null || getClass() != o.getClass()) {
       return false;
     }
-    Cat cat = (Cat) o;
-    return Objects.equals(this.declawed, cat.declawed) &&
-        super.equals(o);
+    return super.equals(o);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(declawed, super.hashCode());
+    return Objects.hash(super.hashCode());
   }
 
   @Override
@@ -100,7 +63,6 @@ public class Cat extends Animal {
     StringBuilder sb = new StringBuilder();
     sb.append("class Cat {\n");
     sb.append("    ").append(toIndentedString(super.toString())).append("\n");
-    sb.append("    declawed: ").append(toIndentedString(declawed)).append("\n");
     sb.append("}");
     return sb.toString();
   }

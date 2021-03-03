@@ -21,15 +21,9 @@ import java.util.Objects;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.HashMap;
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import com.fasterxml.jackson.annotation.JsonTypeName;
-import com.fasterxml.jackson.annotation.JsonValue;
 import io.swagger.annotations.ApiModel;
-import io.swagger.annotations.ApiModelProperty;
 import org.openapitools.client.model.MySchemaNameCharactersAllOf;
 import org.openapitools.client.model.Parent;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
@@ -41,40 +35,12 @@ import org.openapitools.client.JSON;
  */
 @ApiModel(description = "A schema name that has letters, numbers, punctuation and non-ASCII characters. The sanitization rules should make it possible to generate a language-specific classname with allowed characters in that programming language.")
 @JsonPropertyOrder({
-  MySchemaNameCharacters.JSON_PROPERTY_PROP2
 })
 @javax.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen")
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.EXISTING_PROPERTY, property = "objectType", visible = true)
 @JsonTypeName("MySchemaName._-Characters")
 
 public class MySchemaNameCharacters extends Parent {
-  public static final String JSON_PROPERTY_PROP2 = "prop2";
-  private String prop2;
-
-
-  public MySchemaNameCharacters prop2(String prop2) {
-    this.prop2 = prop2;
-    return this;
-  }
-
-   /**
-   * Get prop2
-   * @return prop2
-  **/
-  @javax.annotation.Nullable
-  @ApiModelProperty(value = "")
-  @JsonProperty(JSON_PROPERTY_PROP2)
-  @JsonInclude(value = JsonInclude.Include.USE_DEFAULTS)
-
-  public String getProp2() {
-    return prop2;
-  }
-
-
-  public void setProp2(String prop2) {
-    this.prop2 = prop2;
-  }
-
   /**
    * A container for additional, undeclared properties.
    * This is a holder for any undeclared properties as specified with
@@ -124,15 +90,12 @@ public class MySchemaNameCharacters extends Parent {
     if (o == null || getClass() != o.getClass()) {
       return false;
     }
-    MySchemaNameCharacters mySchemaNameCharacters = (MySchemaNameCharacters) o;
-    return Objects.equals(this.prop2, mySchemaNameCharacters.prop2)&&
-        Objects.equals(this.additionalProperties, mySchemaNameCharacters.additionalProperties) &&
-        super.equals(o);
+    return super.equals(o);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(prop2, super.hashCode(), additionalProperties);
+    return Objects.hash(super.hashCode(), additionalProperties);
   }
 
   @Override
@@ -140,7 +103,6 @@ public class MySchemaNameCharacters extends Parent {
     StringBuilder sb = new StringBuilder();
     sb.append("class MySchemaNameCharacters {\n");
     sb.append("    ").append(toIndentedString(super.toString())).append("\n");
-    sb.append("    prop2: ").append(toIndentedString(prop2)).append("\n");
     sb.append("    additionalProperties: ").append(toIndentedString(additionalProperties)).append("\n");
     sb.append("}");
     return sb.toString();

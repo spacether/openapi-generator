@@ -86,8 +86,6 @@ class EquilateralTriangle(ModelComposed):
         """
         lazy_import()
         return {
-            'shape_type': (str,),  # noqa: E501
-            'triangle_type': (str,),  # noqa: E501
         }
 
     @cached_property
@@ -96,8 +94,6 @@ class EquilateralTriangle(ModelComposed):
 
 
     attribute_map = {
-        'shape_type': 'shapeType',  # noqa: E501
-        'triangle_type': 'triangleType',  # noqa: E501
     }
 
     required_properties = set([
@@ -113,12 +109,8 @@ class EquilateralTriangle(ModelComposed):
     ])
 
     @convert_js_args_to_python_args
-    def __init__(self, shape_type, triangle_type, *args, **kwargs):  # noqa: E501
+    def __init__(self, *args, **kwargs):  # noqa: E501
         """EquilateralTriangle - a model defined in OpenAPI
-
-        Args:
-            shape_type (str):
-            triangle_type (str):
 
         Keyword Args:
             _check_type (bool): if True, values for parameters in openapi_types
@@ -184,8 +176,6 @@ class EquilateralTriangle(ModelComposed):
             '_visited_composed_classes': self._visited_composed_classes,
         }
         required_args = {
-            'shape_type': shape_type,
-            'triangle_type': triangle_type,
         }
         model_args = {}
         model_args.update(required_args)

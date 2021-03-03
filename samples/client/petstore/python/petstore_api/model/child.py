@@ -79,9 +79,6 @@ class Child(ModelComposed):
         """
         lazy_import()
         return {
-            'radio_waves': (bool,),  # noqa: E501
-            'tele_vision': (bool,),  # noqa: E501
-            'inter_net': (bool,),  # noqa: E501
         }
 
     @cached_property
@@ -90,9 +87,6 @@ class Child(ModelComposed):
 
 
     attribute_map = {
-        'radio_waves': 'radioWaves',  # noqa: E501
-        'tele_vision': 'teleVision',  # noqa: E501
-        'inter_net': 'interNet',  # noqa: E501
     }
 
     required_properties = set([
@@ -142,9 +136,6 @@ class Child(ModelComposed):
                                 Animal class but this time we won't travel
                                 through its discriminator because we passed in
                                 _visited_composed_classes = (Animal,)
-            radio_waves (bool): [optional]  # noqa: E501
-            tele_vision (bool): [optional]  # noqa: E501
-            inter_net (bool): [optional]  # noqa: E501
         """
 
         _check_type = kwargs.pop('_check_type', True)

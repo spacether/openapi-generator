@@ -21,15 +21,9 @@ import java.util.Objects;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.HashMap;
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import com.fasterxml.jackson.annotation.JsonTypeName;
-import com.fasterxml.jackson.annotation.JsonValue;
 import io.swagger.annotations.ApiModel;
-import io.swagger.annotations.ApiModelProperty;
 import org.openapitools.client.model.ChildSchemaAllOf;
 import org.openapitools.client.model.Parent;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
@@ -41,39 +35,11 @@ import org.openapitools.client.JSON;
  */
 @ApiModel(description = "A schema that does not have any special character.")
 @JsonPropertyOrder({
-  ChildSchema.JSON_PROPERTY_PROP1
 })
 @javax.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen")
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.EXISTING_PROPERTY, property = "objectType", visible = true)
 
 public class ChildSchema extends Parent {
-  public static final String JSON_PROPERTY_PROP1 = "prop1";
-  private String prop1;
-
-
-  public ChildSchema prop1(String prop1) {
-    this.prop1 = prop1;
-    return this;
-  }
-
-   /**
-   * Get prop1
-   * @return prop1
-  **/
-  @javax.annotation.Nullable
-  @ApiModelProperty(value = "")
-  @JsonProperty(JSON_PROPERTY_PROP1)
-  @JsonInclude(value = JsonInclude.Include.USE_DEFAULTS)
-
-  public String getProp1() {
-    return prop1;
-  }
-
-
-  public void setProp1(String prop1) {
-    this.prop1 = prop1;
-  }
-
   /**
    * A container for additional, undeclared properties.
    * This is a holder for any undeclared properties as specified with
@@ -123,15 +89,12 @@ public class ChildSchema extends Parent {
     if (o == null || getClass() != o.getClass()) {
       return false;
     }
-    ChildSchema childSchema = (ChildSchema) o;
-    return Objects.equals(this.prop1, childSchema.prop1)&&
-        Objects.equals(this.additionalProperties, childSchema.additionalProperties) &&
-        super.equals(o);
+    return super.equals(o);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(prop1, super.hashCode(), additionalProperties);
+    return Objects.hash(super.hashCode(), additionalProperties);
   }
 
   @Override
@@ -139,7 +102,6 @@ public class ChildSchema extends Parent {
     StringBuilder sb = new StringBuilder();
     sb.append("class ChildSchema {\n");
     sb.append("    ").append(toIndentedString(super.toString())).append("\n");
-    sb.append("    prop1: ").append(toIndentedString(prop1)).append("\n");
     sb.append("    additionalProperties: ").append(toIndentedString(additionalProperties)).append("\n");
     sb.append("}");
     return sb.toString();

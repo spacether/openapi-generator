@@ -86,9 +86,6 @@ class Shape(ModelComposed):
         """
         lazy_import()
         return {
-            'shape_type': (str,),  # noqa: E501
-            'quadrilateral_type': (str,),  # noqa: E501
-            'triangle_type': (str,),  # noqa: E501
         }
 
     @cached_property
@@ -103,9 +100,6 @@ class Shape(ModelComposed):
         return {'shape_type': val}
 
     attribute_map = {
-        'shape_type': 'shapeType',  # noqa: E501
-        'quadrilateral_type': 'quadrilateralType',  # noqa: E501
-        'triangle_type': 'triangleType',  # noqa: E501
     }
 
     required_properties = set([
@@ -121,11 +115,8 @@ class Shape(ModelComposed):
     ])
 
     @convert_js_args_to_python_args
-    def __init__(self, shape_type, *args, **kwargs):  # noqa: E501
+    def __init__(self, *args, **kwargs):  # noqa: E501
         """Shape - a model defined in OpenAPI
-
-        Args:
-            shape_type (str):
 
         Keyword Args:
             _check_type (bool): if True, values for parameters in openapi_types
@@ -158,8 +149,6 @@ class Shape(ModelComposed):
                                 Animal class but this time we won't travel
                                 through its discriminator because we passed in
                                 _visited_composed_classes = (Animal,)
-            quadrilateral_type (str): [optional]  # noqa: E501
-            triangle_type (str): [optional]  # noqa: E501
         """
 
         _check_type = kwargs.pop('_check_type', True)
@@ -193,7 +182,6 @@ class Shape(ModelComposed):
             '_visited_composed_classes': self._visited_composed_classes,
         }
         required_args = {
-            'shape_type': shape_type,
         }
         model_args = {}
         model_args.update(required_args)

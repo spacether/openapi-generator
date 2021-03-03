@@ -17,13 +17,6 @@ import java.util.Objects;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.HashMap;
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonTypeName;
-import com.fasterxml.jackson.annotation.JsonValue;
-import io.swagger.annotations.ApiModel;
-import io.swagger.annotations.ApiModelProperty;
 import org.openapitools.client.model.ShapeInterface;
 import org.openapitools.client.model.TriangleInterface;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
@@ -34,63 +27,9 @@ import org.openapitools.client.JSON;
  * IsoscelesTriangle
  */
 @JsonPropertyOrder({
-  IsoscelesTriangle.JSON_PROPERTY_SHAPE_TYPE,
-  IsoscelesTriangle.JSON_PROPERTY_TRIANGLE_TYPE
 })
 @javax.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen")
 public class IsoscelesTriangle {
-  public static final String JSON_PROPERTY_SHAPE_TYPE = "shapeType";
-  private String shapeType;
-
-  public static final String JSON_PROPERTY_TRIANGLE_TYPE = "triangleType";
-  private String triangleType;
-
-
-  public IsoscelesTriangle shapeType(String shapeType) {
-    this.shapeType = shapeType;
-    return this;
-  }
-
-   /**
-   * Get shapeType
-   * @return shapeType
-  **/
-  @ApiModelProperty(required = true, value = "")
-  @JsonProperty(JSON_PROPERTY_SHAPE_TYPE)
-  @JsonInclude(value = JsonInclude.Include.ALWAYS)
-
-  public String getShapeType() {
-    return shapeType;
-  }
-
-
-  public void setShapeType(String shapeType) {
-    this.shapeType = shapeType;
-  }
-
-
-  public IsoscelesTriangle triangleType(String triangleType) {
-    this.triangleType = triangleType;
-    return this;
-  }
-
-   /**
-   * Get triangleType
-   * @return triangleType
-  **/
-  @ApiModelProperty(required = true, value = "")
-  @JsonProperty(JSON_PROPERTY_TRIANGLE_TYPE)
-  @JsonInclude(value = JsonInclude.Include.ALWAYS)
-
-  public String getTriangleType() {
-    return triangleType;
-  }
-
-
-  public void setTriangleType(String triangleType) {
-    this.triangleType = triangleType;
-  }
-
 
   /**
    * Return true if this IsoscelesTriangle object is equal to o.
@@ -103,22 +42,18 @@ public class IsoscelesTriangle {
     if (o == null || getClass() != o.getClass()) {
       return false;
     }
-    IsoscelesTriangle isoscelesTriangle = (IsoscelesTriangle) o;
-    return Objects.equals(this.shapeType, isoscelesTriangle.shapeType) &&
-        Objects.equals(this.triangleType, isoscelesTriangle.triangleType);
+    return true;
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(shapeType, triangleType);
+    return Objects.hash();
   }
 
   @Override
   public String toString() {
     StringBuilder sb = new StringBuilder();
     sb.append("class IsoscelesTriangle {\n");
-    sb.append("    shapeType: ").append(toIndentedString(shapeType)).append("\n");
-    sb.append("    triangleType: ").append(toIndentedString(triangleType)).append("\n");
     sb.append("}");
     return sb.toString();
   }

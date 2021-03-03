@@ -79,10 +79,6 @@ class FruitReq(ModelComposed):
         """
         lazy_import()
         return {
-            'mealy': (bool,),  # noqa: E501
-            'sweet': (bool,),  # noqa: E501
-            'cultivar': (str,),  # noqa: E501
-            'length_cm': (float,),  # noqa: E501
         }
 
     @cached_property
@@ -91,10 +87,6 @@ class FruitReq(ModelComposed):
 
 
     attribute_map = {
-        'mealy': 'mealy',  # noqa: E501
-        'sweet': 'sweet',  # noqa: E501
-        'cultivar': 'cultivar',  # noqa: E501
-        'length_cm': 'lengthCm',  # noqa: E501
     }
 
     required_properties = set([
@@ -144,10 +136,6 @@ class FruitReq(ModelComposed):
                                 Animal class but this time we won't travel
                                 through its discriminator because we passed in
                                 _visited_composed_classes = (Animal,)
-            mealy (bool): [optional]  # noqa: E501
-            sweet (bool): [optional]  # noqa: E501
-            cultivar (str): [optional]  # noqa: E501
-            length_cm (float): [optional]  # noqa: E501
         """
 
         _check_type = kwargs.pop('_check_type', True)

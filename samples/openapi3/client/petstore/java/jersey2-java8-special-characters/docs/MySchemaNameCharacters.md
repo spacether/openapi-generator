@@ -7,7 +7,6 @@ A schema name that has letters, numbers, punctuation and non-ASCII characters. T
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**prop2** | **String** |  |  [optional]
 
 
 

@@ -17,15 +17,8 @@ import java.util.Objects;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.HashMap;
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import com.fasterxml.jackson.annotation.JsonTypeName;
-import com.fasterxml.jackson.annotation.JsonValue;
-import io.swagger.annotations.ApiModel;
-import io.swagger.annotations.ApiModelProperty;
 import org.openapitools.client.model.Animal;
 import org.openapitools.client.model.DogAllOf;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
@@ -36,39 +29,11 @@ import org.openapitools.client.JSON;
  * Dog
  */
 @JsonPropertyOrder({
-  Dog.JSON_PROPERTY_BREED
 })
 @javax.annotation.Generated(value = "org.openapitools.codegen.languages.JavaClientCodegen")
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.EXISTING_PROPERTY, property = "className", visible = true)
 
 public class Dog extends Animal {
-  public static final String JSON_PROPERTY_BREED = "breed";
-  private String breed;
-
-
-  public Dog breed(String breed) {
-    this.breed = breed;
-    return this;
-  }
-
-   /**
-   * Get breed
-   * @return breed
-  **/
-  @javax.annotation.Nullable
-  @ApiModelProperty(value = "")
-  @JsonProperty(JSON_PROPERTY_BREED)
-  @JsonInclude(value = JsonInclude.Include.USE_DEFAULTS)
-
-  public String getBreed() {
-    return breed;
-  }
-
-
-  public void setBreed(String breed) {
-    this.breed = breed;
-  }
-
 
   /**
    * Return true if this Dog object is equal to o.
@@ -81,14 +46,12 @@ public class Dog extends Animal {
     if (o == null || getClass() != o.getClass()) {
       return false;
     }
-    Dog dog = (Dog) o;
-    return Objects.equals(this.breed, dog.breed) &&
-        super.equals(o);
+    return super.equals(o);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(breed, super.hashCode());
+    return Objects.hash(super.hashCode());
   }
 
   @Override
@@ -96,7 +59,6 @@ public class Dog extends Animal {
     StringBuilder sb = new StringBuilder();
     sb.append("class Dog {\n");
     sb.append("    ").append(toIndentedString(super.toString())).append("\n");
-    sb.append("    breed: ").append(toIndentedString(breed)).append("\n");
     sb.append("}");
     return sb.toString();
   }
